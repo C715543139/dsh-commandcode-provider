@@ -1165,6 +1165,8 @@ export function subscriptionPlanInfo(planId: string): { name: string; monthlyCre
  * for the plan id and `/alpha/billing/credits` for the on-demand balances).
  */
 export interface CommandCodeBillingAccess {
+  /** Normalized account plan id (`individual-goat`, `teams-pro`, …); undefined when unknown. */
+  planId?: string
   /** Account plan tier weight on the {@link PLAN_ORDER} scale; undefined when the plan is unknown. */
   tierWeight: number | undefined
   /**

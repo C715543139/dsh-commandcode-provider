@@ -158,6 +158,94 @@ test('an over-cap window keeps its true percentage and clamps only the bar', () 
   assert.equal(fiveHour.exceeded, true)
 })
 
+test('a selected quota model expresses GOAT credits in that model’s dollars', () => {
+  // GOAT base pool = 70 credits; the selected model publishes $100/month.
+  // 14 credits × 100/70 = $20 (5-hour cap), 35 → $50 (weekly),
+  // 46.92 remaining credits → $67.03.
+  const view = buildPanelView({
+    usage: usage({
+      report: {
+        accounts: [entry({
+          report: {
+            credits: {
+              monthlyCredits: 46.92,
+              purchasedCredits: 0,
+              freeCredits: 0,
+              fiveHour: { used: 1, cap: 14, exceeded: false, resetAt: 0 },
+              weekly: { used: 1.32, cap: 35, exceeded: false, resetAt: 0 },
+            },
+            plan: {
+              planId: 'individual-goat',
+              name: 'GOAT',
+              status: 'active',
+              monthlyCredits: 70,
+              quotaModel: 'deepseek/deepseek-v4.1-flash',
+              quotaAllowance: 100,
+              currentPeriodEnd: 0,
+            },
+          },
+        })],
+      },
+    }),
+    apiKeyConfigured: true,
+    quotaModelName: 'DeepSeek V4.1 Flash',
+  })
+
+  assert.equal(view.quotaModel, 'DeepSeek V4.1 Flash')
+  assert.equal(view.selected?.quotaModel, 'DeepSeek V4.1 Flash')
+  assert.equal(view.selected?.monthly?.limit, '$100.00')
+  assert.equal(view.selected?.monthly?.used, '$32.97')
+  assert.equal(view.selected?.monthly?.remaining, '$67.03')
+  assert.equal(view.selected?.monthly?.percent, 33)
+
+  const fiveHour = view.selected?.windows.find((window) => window.label === 'fiveHour')
+  assert.ok(fiveHour)
+  assert.equal(fiveHour.value, '$1.43 / $20.00')
+  assert.equal(fiveHour.percent, 7)
+  const weekly = view.selected?.windows.find((window) => window.label === 'weekly')
+  assert.ok(weekly)
+  assert.equal(weekly.value, '$1.89 / $50.00')
+  assert.equal(weekly.percent, 4)
+
+  assert.equal(view.footerBars[0]?.detail, '$1.43 / $20.00')
+  assert.equal(view.footerBars[1]?.detail, '$1.89 / $50.00')
+  assert.ok(view.footTitle.includes('DeepSeek V4.1 Flash'), view.footTitle)
+})
+
+test('a quota model with no published allowance keeps the raw credit figures', () => {
+  // Provider/Max plans and unknown models have no per-model allowance; the
+  // Host then omits quotaAllowance and the projection must not invent one.
+  const view = buildPanelView({
+    usage: usage({
+      report: {
+        accounts: [entry({
+          report: {
+            credits: {
+              monthlyCredits: 46.92,
+              purchasedCredits: 0,
+              freeCredits: 0,
+              fiveHour: { used: 1, cap: 14, exceeded: false, resetAt: 0 },
+            },
+            plan: {
+              planId: 'individual-max',
+              name: 'Max',
+              status: 'active',
+              monthlyCredits: 150,
+              quotaModel: 'deepseek/deepseek-v4.1-flash',
+              currentPeriodEnd: 0,
+            },
+          },
+        })],
+      },
+    }),
+    apiKeyConfigured: true,
+    quotaModelName: 'DeepSeek V4.1 Flash',
+  })
+  assert.equal(view.quotaModel, '')
+  assert.equal(view.selected?.monthly?.limit, '$150.00')
+  assert.equal(view.selected?.windows[0]?.value, '$1.00 / $14.00')
+})
+
 test('the footer card stacks 5-hour then weekly, and leaves uncapped windows out', () => {
   const view = buildPanelView({
     usage: usage({ report: { accounts: [entry({ report: { credits: CREDITS } })] } }),

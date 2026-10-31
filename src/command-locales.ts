@@ -28,6 +28,7 @@ export type CommandCodeCommandKey =
   | 'rateLimitBadge'
   | 'planLine'
   | 'planPeriodSuffix'
+  | 'quotaModelLine'
   | 'usageHeader'
   | 'requestsLine'
   | 'costLine'
@@ -64,6 +65,7 @@ export const commandcodeCommand: Record<LocaleId, Record<CommandCodeCommandKey, 
       '⚠️ 无法连接 Command Code 服务 — 请检查网络或 API 地址',
     planLine: '  📦 套餐    {name}{status}{period}',
     planPeriodSuffix: ' · 账期截止 {date}',
+    quotaModelLine: '  🧮 额度按  {model} 的 {allowance}/月额度换算',
     usageHeader: '── 请求 ──────────────────────────────',
     requestsLine: '  💬 请求    {n} 次 / 失败 {f}  成功率 {r}%',
     costLine: '  💰 花费    {money}  ({credits} credits)',
@@ -99,6 +101,7 @@ export const commandcodeCommand: Record<LocaleId, Record<CommandCodeCommandKey, 
       '⚠️ could not reach the Command Code service — check your network or the API base setting',
     planLine: '  📦 Plan     {name}{status}{period}',
     planPeriodSuffix: ' · period ends {date}',
+    quotaModelLine: '  🧮 Quotas   expressed in {model} usage ({allowance}/mo)',
     usageHeader: '── Requests ──────────────────────────',
     requestsLine: '  💬 Requests {n} / failed {f}  success rate {r}%',
     costLine: '  💰 Spend    {money}  ({credits} credits)',

@@ -64,7 +64,7 @@ import {
 import { RETRY_MAX_DELAY_MS } from './accounts.ts'
 import { requestImageTarget } from './image-request.ts'
 import { commandCodeImageTokens } from './image-tokens.ts'
-import { allowanceTierForWeight } from './model-prices.ts'
+import { allowanceTierForWeight, modelAllowanceFor } from './model-prices.ts'
 import { boundTraceText, openStreamTrace } from './stream-trace.ts'
 import { openRequestTiming, type RequestTiming, type RequestTimingSink } from './request-timing.ts'
 import { THROTTLED_CODE } from './transient-retry.ts'
@@ -1550,6 +1550,15 @@ export interface CommandCodeConnectionOptions {
    * 422 `cmd_zdr_no_providers`; never retry that request without the header.
    */
   zdr?: boolean
+  /**
+   * Display-only quota model: catalog id whose per-model monthly allowance the
+   * quota surfaces use to express the plan's credits in dollars. It never
+   * affects routing or the chat model. `getUsage()` resolves it against each
+   * account's own plan tier and puts the result on the report (`plan.quotaModel`
+   * / `plan.quotaAllowance`), so the browser and `/commandcode` share one
+   * conversion. Unset keeps the raw plan credits.
+   */
+  quotaModel?: string | undefined
 }
 
 /**
@@ -1699,6 +1708,19 @@ interface CommandCodePlan {
   currentPeriodEnd: number
   /** 官方订阅账期起点，毫秒；旧宿主或未报告该字段时缺省。 */
   currentPeriodStart?: number
+  /**
+   * The display-only quota model configured for this account (`Config.quotaModel`),
+   * echoed on the report so every surface knows which model the dollar figures
+   * describe. Absent when no model is selected.
+   */
+  quotaModel?: string
+  /**
+   * That model's monthly allowance in USD for THIS account's plan, or absent
+   * when the plan publishes no per-model allowance (Provider/Max/unknown), the
+   * model has no allowance row, or no model is selected. The client only
+   * converts when this and {@link monthlyCredits} are both present and positive.
+   */
+  quotaAllowance?: number
 }
 
 /**
@@ -2754,13 +2776,19 @@ export class CommandCodeAdapter<C extends CommandCodeConnectionOptions = Command
     if (accesses === undefined) return undefined
     let highest: number | undefined
     for (const access of accesses) {
-      const weight = access?.tierWeight
+      if (access === undefined) continue
+      // Per-model allowances exist only for the `individual-*` Go/GOAT/Pro
+      // plans. `teams-pro` carries Pro's tierWeight for picker ordering but has
+      // no per-model bracket; skipping it here keeps the settings badge honest.
+      const planId = access.planId?.toLowerCase().replace(/_/g, '-')
+      if (planId === undefined || !planId.startsWith('individual-')) continue
+      const weight = access.tierWeight
       if (weight === undefined) continue
       if (highest === undefined || weight > highest) highest = weight
     }
     // `allowanceTierForWeight` owns the weight → bracket mapping (and the
     // decision that Provider, Max and Ultra have no bracket at all), so this
-    // method only has to answer "what is the highest plan in the pool?".
+    // method only has to answer "what is the highest eligible plan in the pool?".
     return allowanceTierForWeight(highest)
   }
 
@@ -3054,6 +3082,7 @@ export class CommandCodeAdapter<C extends CommandCodeConnectionOptions = Command
         planId = stringValue(creditsData?.planId)
       }
       return {
+        ...(planId === undefined ? {} : { planId }),
         tierWeight: planId === undefined ? undefined : subscriptionPlanInfo(planId)?.tierWeight,
         onDemandCredits: (numberValue(creditsData?.purchasedCredits) ?? 0) + (numberValue(creditsData?.freeCredits) ?? 0),
       }
@@ -3248,6 +3277,27 @@ export class CommandCodeAdapter<C extends CommandCodeConnectionOptions = Command
         currentPeriodEnd: periodTimestampValue(subData?.currentPeriodEnd),
       }
       if (validStart) report.plan.currentPeriodStart = periodStart
+      // 展示用额度模型：按本账户自己的套餐档位解析每月额度，附在报告上。
+      // 与聊天模型、路由完全无关；未选择、套餐无按模型额度或模型无额度行时
+      // 不写这两个字段，所有界面继续显示计划积分原值。
+      const quotaModel = typeof connection.quotaModel === 'string' && connection.quotaModel.trim() !== ''
+        ? connection.quotaModel.trim()
+        : undefined
+      if (quotaModel !== undefined) {
+        report.plan.quotaModel = quotaModel
+        // Per-model allowances are published for the `individual-*` Go/GOAT/Pro
+        // plans only. `teams-pro` shares their tierWeight (2) merely for the
+        // picker's ordering, but the team plan bills 1 credit = $1, so mapping
+        // it to the Pro bracket would invent a ratio. Provider/Max/Ultra are
+        // already filtered by `allowanceTierForWeight`.
+        const normalizedPlanId = planId?.toLowerCase().replace(/_/g, '-')
+        const perModelPlan = normalizedPlanId !== undefined && normalizedPlanId.startsWith('individual-')
+        const tier = perModelPlan ? allowanceTierForWeight(info?.tierWeight) : undefined
+        const allowance = tier === undefined ? undefined : modelAllowanceFor(quotaModel)?.[tier]
+        if (allowance !== undefined && Number.isFinite(allowance) && allowance > 0) {
+          report.plan.quotaAllowance = allowance
+        }
+      }
     }
 
     const blocked = classifyTotalFailure(failures, failed)

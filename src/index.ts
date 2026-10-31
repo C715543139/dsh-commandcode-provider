@@ -311,6 +311,15 @@ export interface Config {
    */
   showSidebarQuota?: boolean
   /**
+   * Display-only quota model: a GOAT-plan catalog model id whose monthly
+   * allowance the quota surfaces use to express the plan's credits in dollars.
+   * It never affects routing, chat, or the model picker. Default/unset keeps
+   * the plan's raw credit figures (the historical display). The Host resolves
+   * the model's allowance against each account's own plan tier and attaches it
+   * to the usage report; see `src/quota-model.ts` for the ratio.
+   */
+  quotaModel?: string
+  /**
    * Whether requests enforce zero data retention: the provider then routes
    * them only through upstreams that keep no prompts/completions and never
    * train on them (its own opt-in, `CMD_ZDR=1` in the CLI / `x-cmd-zdr: 1` on
@@ -377,6 +386,9 @@ export const Config: z<Config> = z.object(markVolatileFields({
   maxOutputTokens: z.number().min(OMIT_OUTPUT_TOKENS).max(MAX_OUTPUT_TOKEN_LIMIT).step(1),
   webSearch: z.boolean().default(true),
   showSidebarQuota: z.boolean().default(false),
+  // 展示用额度模型（只影响额度数字的换算，不参与请求路由或聊天模型）。
+  // 存目录 id；空字符串等同未设置。
+  quotaModel: z.string(),
   accounts: z.array(z.object({
     label: z.string(),
     apiKeyEnv: z.string().role('credential-ref'),
@@ -443,6 +455,10 @@ export function resolveAdapterOptions(config: Config): ResolvedCommandCodeOption
     // The connection carries the switch; the adapter enforces it on every
     // chat request rather than depending on a client-side coverage snapshot.
     zdr: config.zdr === true,
+    // 展示用额度模型：只保留非空字符串；程序化构造的非法值等同未设置。
+    quotaModel: typeof config.quotaModel === 'string' && config.quotaModel.trim() !== ''
+      ? config.quotaModel.trim()
+      : undefined,
   }
 }
 

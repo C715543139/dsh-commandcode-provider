@@ -216,6 +216,10 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
     `ling-3.1-flash`（1.82.2 新增行）的定价记录另带一个**尚未生效**的 `planBudgetSteps`：
     `2026-10-15T12:30:00Z`（北京时间 20:30）起 GOAT／Pro 由 $20／$30 上调至 $100／$110，Go 保持 $6。
     生成器只写页面**当前**值，因此该时刻之后重跑 `--check` 会报额度漂移——这是预期行为，不是缺陷。
+    2026-10-31 同步：`deepseek-v4.1-flash` 与 `glm-5.3-flash` 的 GOAT／Pro 月额度由 $80／$90
+    上调至 **$100／$110**（GOAT 页与定价页一致）。设置页的“额度计算模型”也读这张表：
+    它只列最低套餐为 Go／GOAT 且额度为正的模型（免费模型、Pro/Max 专属模型不列），
+    宿主再按账户套餐档位取值；换算规则见 [usage and cost](usage-and-cost.md)。
     See [usage and cost](usage-and-cost.md) for how the settings page picks the
     bracket from the account pool.
   - `KNOWN_DEALS` — catalog ID → `{ label, expiresAt?, free? }` from the pricing page's `#deals`.

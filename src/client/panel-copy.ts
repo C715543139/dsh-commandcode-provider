@@ -57,6 +57,9 @@ export type PanelKey =
   | 'remaining'
   | 'purchased'
   | 'free'
+  /** Display-only quota model (the model whose allowance the figures describe). */
+  | 'quotaModel'
+  | 'quotaModelHint'
   /** Usage-window rows (long labels in the dashboard, short in the footer). */
   | 'fiveHour'
   | 'weekly'
@@ -131,6 +134,8 @@ export const PANEL_COPY_ZH: Record<PanelKey, string> = {
   remaining: '剩余',
   purchased: '已购',
   free: '赠送',
+  quotaModel: '额度模型',
+  quotaModelHint: '额度数字按该模型在套餐中的每月额度换算；与聊天模型选择无关。',
   fiveHour: '5 小时窗口',
   weekly: '每周窗口',
   fiveHourShort: '5 小时',
@@ -190,6 +195,8 @@ export const PANEL_COPY_EN: Record<PanelKey, string> = {
   remaining: 'Remaining',
   purchased: 'Purchased',
   free: 'Free',
+  quotaModel: 'Quota model',
+  quotaModelHint: 'Quota figures are expressed in this model’s monthly allowance. Independent of the chat model.',
   fiveHour: '5-hour window',
   weekly: 'Weekly window',
   fiveHourShort: '5-hour',

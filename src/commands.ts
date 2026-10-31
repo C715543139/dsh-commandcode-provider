@@ -23,6 +23,7 @@ import type { CommandCodeConnectionOptions, CommandCodeUsageReport } from './ada
 import type { CommandCodeAccountUsage, CommandCodeAccountsReport } from './usage-wire.ts'
 import { commandCopy, type LocaleId } from './command-locales.ts'
 import { formatMoney, formatMoneyExact, formatSuccessRate, formatTokensCompact, formatResetAt, windowRatio } from './display-format.ts'
+import { quotaRatio, quotaValue } from './quota-model.ts'
 
 /** Everything the command needs beyond the adapter itself. */
 export interface CommandCodeCommandDeps<C extends CommandCodeConnectionOptions = CommandCodeConnectionOptions> {
@@ -100,6 +101,10 @@ function renderReport(report: CommandCodeUsageReport, locale: LocaleId, title?: 
     lines.push(commandCopy(locale, 'blockedNetwork'), '')
   }
 
+  // 展示用额度模型：只改变计划积分呈现成哪种模型的美元额度；已购/赠送积分
+  // 本来就是按模型成本购买的额度，不参与这个比例。
+  const quotaScale = quotaRatio(report.plan)
+
   if (report.plan && report.plan.name !== '') {
     const p = report.plan
     const status = p.status !== '' && p.status !== 'active' ? ` (${p.status})` : ''
@@ -109,7 +114,13 @@ function renderReport(report: CommandCodeUsageReport, locale: LocaleId, title?: 
     lines.push(commandCopy(locale, 'planLine')
       .replace('{name}', p.name)
       .replace('{status}', status)
-      .replace('{period}', period), '')
+      .replace('{period}', period))
+    if (quotaScale !== undefined && p.quotaModel !== undefined) {
+      lines.push(commandCopy(locale, 'quotaModelLine')
+        .replace('{model}', p.quotaModel)
+        .replace('{allowance}', moneyShort(p.quotaAllowance ?? 0)))
+    }
+    lines.push('')
   }
 
   if (report.usage) {
@@ -132,41 +143,46 @@ function renderReport(report: CommandCodeUsageReport, locale: LocaleId, title?: 
 
   if (report.credits) {
     const c = report.credits
-    const balanceTotal = c.monthlyCredits + c.purchasedCredits
+    const monthlyCredits = quotaValue(c.monthlyCredits, quotaScale)
+    const balanceTotal = monthlyCredits + c.purchasedCredits
     const ratioKnown = c.monthlyReported !== false && c.purchasedReported !== false && balanceTotal > 0
     lines.push(
       commandCopy(locale, 'creditsHeader'),
       commandCopy(locale, 'monthlyLine')
-        .replace('{monthly}', (c.monthlyReported === false ? '—' : moneyShort(c.monthlyCredits)))
+        .replace('{monthly}', (c.monthlyReported === false ? '—' : moneyShort(monthlyCredits)))
         .replace('{purchased}', (c.purchasedReported === false ? '—' : moneyShort(c.purchasedCredits)))
         .replace('{free}', (c.freeReported === false ? '—' : moneyShort(c.freeCredits))),
       ...(ratioKnown ? [commandCopy(locale, 'barLine')
-        .replace('{bar}', bar(c.monthlyCredits, balanceTotal))
-        .replace('{pct}', ((c.monthlyCredits / balanceTotal) * 100).toFixed(0))] : []),
+        .replace('{bar}', bar(monthlyCredits, balanceTotal))
+        .replace('{pct}', ((monthlyCredits / balanceTotal) * 100).toFixed(0))] : []),
       '',
     )
     // Only the windows the endpoint actually reported: an unlimited account
     // reports none, and printing two zeroed rows for it would invent limits.
     const windowLines: string[] = []
     if (c.fiveHour !== undefined) {
+      const used = quotaValue(c.fiveHour.used, quotaScale)
+      const cap = quotaValue(c.fiveHour.cap, quotaScale)
       windowLines.push(
         commandCopy(locale, 'fiveHourLine')
-          .replace('{used}', moneyShort(c.fiveHour.used))
-          .replace('{cap}', moneyShort(c.fiveHour.cap))
+          .replace('{used}', moneyShort(used))
+          .replace('{cap}', moneyShort(cap))
           .replace('{warn}', c.fiveHour.exceeded ? commandCopy(locale, 'exceededWarning') : ''),
         commandCopy(locale, 'windowBarLine')
-          .replace('{bar}', bar(c.fiveHour.used, c.fiveHour.cap))
+          .replace('{bar}', bar(used, cap))
           .replace('{when}', resetLabel(c.fiveHour.resetAt)),
       )
     }
     if (c.weekly !== undefined) {
+      const used = quotaValue(c.weekly.used, quotaScale)
+      const cap = quotaValue(c.weekly.cap, quotaScale)
       windowLines.push(
         commandCopy(locale, 'weeklyLine')
-          .replace('{used}', moneyShort(c.weekly.used))
-          .replace('{cap}', moneyShort(c.weekly.cap))
+          .replace('{used}', moneyShort(used))
+          .replace('{cap}', moneyShort(cap))
           .replace('{warn}', c.weekly.exceeded ? commandCopy(locale, 'exceededWarning') : ''),
         commandCopy(locale, 'windowBarLine')
-          .replace('{bar}', bar(c.weekly.used, c.weekly.cap))
+          .replace('{bar}', bar(used, cap))
           .replace('{when}', resetLabel(c.weekly.resetAt)),
       )
     }

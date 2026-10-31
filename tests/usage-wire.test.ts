@@ -93,6 +93,27 @@ test('账期起点可选，严格远端保留新字段并兼容旧报告', () =>
   }
 })
 
+test('schema round-trips the optional quota-model fields and rejects malformed ones', () => {
+  const report = makeReport()
+  report.plan!.quotaModel = 'deepseek/deepseek-v4.1-flash'
+  report.plan!.quotaAllowance = 110
+  const value = wrap(makeAccount(report))
+  assert.deepEqual(usageReportSchema.parse(value), value)
+
+  // An older Host simply omits both fields; the client then keeps raw credits.
+  const legacy = makeReport()
+  const parsed = usageReportSchema.parse(wrap(makeAccount(legacy)))
+  assert.equal(Object.hasOwn(parsed.accounts[0]!.report.plan!, 'quotaModel'), false)
+  assert.equal(Object.hasOwn(parsed.accounts[0]!.report.plan!, 'quotaAllowance'), false)
+
+  for (const invalid of [1, null, {}]) {
+    assert.throws(() => usageReportSchema.parse(wrap(makeAccount({ ...report, plan: { ...report.plan!, quotaModel: invalid as unknown as string } }))))
+  }
+  for (const invalid of ['100', NaN, Infinity, -1]) {
+    assert.throws(() => usageReportSchema.parse(wrap(makeAccount({ ...report, plan: { ...report.plan!, quotaAllowance: invalid as unknown as number } }))))
+  }
+})
+
 test('schema accepts multiple accounts with distinct rotation state', () => {
   const value = wrap(
     makeAccount(makeReport()),

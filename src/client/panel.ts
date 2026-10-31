@@ -20,6 +20,7 @@ import type { CommandCodeUsageReport } from '../adapter.ts'
 import type { CommandCodeAccountUsage } from '../usage-wire.ts'
 import type { UsagePageState } from './usage.ts'
 import { compactCountTitle, formatCompactCount, formatMoney, formatMoneyExact, formatSuccessRate, formatTokensCompact, formatResetAt, formatUsageBillingPeriod } from '../display-format.ts'
+import { quotaRatio, quotaValue } from '../quota-model.ts'
 import { PANEL_KEYS, panelTextEN } from './panel-copy.ts'
 import type { PanelKey, PanelTranslator } from './panel-copy.ts'
 
@@ -128,6 +129,12 @@ export interface PanelAccountView {
   monthly: PanelMonthlyView | undefined
   windows: PanelWindowView[]
   stats: PanelStatView[]
+  /**
+   * Display name of the selected quota model when this account's figures were
+   * converted, else empty. The plan's raw credits stay the source; this only
+   * labels which model's dollars the displayed amounts describe.
+   */
+  quotaModel: string
   /** 官方统计周期；与订阅未对齐时显示未知，不能用账期截止日单独推断。 */
   usagePeriod: string
 }
@@ -147,6 +154,12 @@ export interface PanelView {
   text: Partial<Record<PanelKey, string>>
   /** Footer-card plan text (`Go`, `Pro`, …), or a state word. */
   planName: string
+  /**
+   * Display name of the selected quota model for the surface's serving account,
+   * or empty when the account's figures are the raw plan credits. The footer
+   * tooltip names it; the dashboard header shows it as a badge.
+   */
+  quotaModel: string
   /** Footer-card rotation/credential state line; empty when nothing to say. */
   status: string
   /**
@@ -203,6 +216,12 @@ export interface PanelViewInput {
    * path when no locale face is installed).
    */
   t?: PanelTranslator
+  /**
+   * Display name of the stored quota model, resolved by the caller from the
+   * settings catalog. Used only when the report says an allowance was applied;
+   * when absent the report's raw catalog id is shown instead.
+   */
+  quotaModelName?: string | undefined
 }
 
 /** A quota window's state as the wire carries it. */
@@ -259,14 +278,19 @@ function barPercent(percent: number): number {
 }
 
 /** Build one quota-window view. */
-function windowView(label: PanelKey, limit: WindowInput): PanelWindowView {
-  const percent = rawPercent(limit.used, limit.cap)
+function windowView(label: PanelKey, limit: WindowInput, ratio: number | undefined): PanelWindowView {
+  // The endpoint reports credits; display them in the selected model's dollars
+  // when a model was chosen (and its allowance resolved). The PERCENTAGE is the
+  // same either way — both halves are scaled by the same factor.
+  const used = quotaValue(limit.used, ratio)
+  const cap = quotaValue(limit.cap, ratio)
+  const percent = rawPercent(used, cap)
   const capped = limit.cap > 0
   return {
     label,
     // Spend only: an uncapped window has no denominator, so its row pairs this
     // figure with the "unlimited" label instead of a `used / cap` it lacks.
-    value: capped ? `${money(limit.used)} / ${money(limit.cap)}` : money(limit.used),
+    value: capped ? `${money(used)} / ${money(cap)}` : money(used),
     capped,
     percent,
     barPercent: barPercent(percent),
@@ -291,43 +315,59 @@ function windowView(label: PanelKey, limit: WindowInput): PanelWindowView {
  * the credits payload is present at all (`hasCreditsInfo`); every derived figure
  * here stays a placeholder until the balance reported.
  */
-function monthlyView(report: CommandCodeUsageReport): PanelMonthlyView | undefined {
+function monthlyView(report: CommandCodeUsageReport, ratio: number | undefined): PanelMonthlyView | undefined {
   const credits = report.credits
   const plan = report.plan
   if (credits === undefined && plan === undefined) return undefined
 
-  const limitValue = plan?.monthlyCredits ?? null
+  // With a quota model selected AND its allowance resolved for this plan, the
+  // monthly CONSUMPTION is still measured in plan credits; only its unit
+  // changes. The plan's own credit total is the fallback (the historical view).
+  const allowance = plan?.quotaAllowance
+  const scaled = ratio !== undefined && allowance !== undefined && allowance > 0
+  const limitValue = scaled ? allowance : (plan?.monthlyCredits ?? null)
+  const scale = scaled ? ratio : undefined
   // Only an EXPLICIT `false` means the balance was omitted. An unset flag comes
   // from a Host half older than the field, which always sent a real number.
   const remainingReported = credits !== undefined && credits.monthlyReported !== false
-  const remaining = remainingReported ? Math.max(0, credits.monthlyCredits) : 0
+  const remainingCredits = remainingReported ? Math.max(0, credits.monthlyCredits) : 0
+  const remainingValue = quotaValue(remainingCredits, scale)
   // A ratio needs BOTH halves: the plan's total and the balance left of it.
   const known = limitValue !== null && limitValue > 0 && remainingReported
-  const used = known ? Math.max(0, limitValue - remaining) : 0
+  const used = known ? Math.max(0, limitValue - remainingValue) : 0
   const percent = known ? rawPercent(used, limitValue) : 0
 
   return {
     known,
     limit: limitValue !== null ? money(limitValue) : UNREPORTED,
     used: known ? money(used) : UNREPORTED,
-    remaining: remainingReported ? money(remaining) : UNREPORTED,
+    remaining: remainingReported ? money(remainingValue) : UNREPORTED,
+    // Purchased and free credits are pay-as-you-go dollars, not plan credits:
+    // they are never weighted by a model's allowance.
     purchased: credits !== undefined && credits.purchasedReported !== false ? money(Math.max(0, credits.purchasedCredits)) : UNREPORTED,
     free: credits !== undefined && credits.freeReported !== false ? money(Math.max(0, credits.freeCredits)) : UNREPORTED,
     percent,
     barPercent: barPercent(percent),
-    exhausted: known && remaining <= 0,
+    exhausted: known && remainingValue <= 0,
     periodEnds: dateText(plan?.currentPeriodEnd ?? 0),
   }
 }
 
 /** Build one account's view. */
-function accountView(entry: CommandCodeAccountUsage, t: PanelTranslator): PanelAccountView {
+function accountView(entry: CommandCodeAccountUsage, t: PanelTranslator, quotaModelName: string | undefined): PanelAccountView {
   const { report } = entry
   const account = report.account
   const plan = report.plan
   const credits = report.credits
   const usage = report.usage
   const usageRange = formatUsageBillingPeriod(usage?.periodStart, plan?.currentPeriodStart, plan?.currentPeriodEnd)
+  // One ratio per account: its OWN plan tier resolved the selected model's
+  // allowance on the Host, so a pool on mixed plans still shows each account's
+  // true dollar-equivalent.
+  const ratio = quotaRatio(plan)
+  const quotaModel = ratio === undefined
+    ? ''
+    : (quotaModelName !== undefined && quotaModelName !== '' ? quotaModelName : plan?.quotaModel ?? '')
 
   const stats: PanelStatView[] = []
   if (usage !== undefined) {
@@ -360,8 +400,8 @@ function accountView(entry: CommandCodeAccountUsage, t: PanelTranslator): PanelA
   // One row per window the endpoint actually REPORTED: an unlimited plan
   // reports none, and drawing two zero-cap rows would invent a limit it does not
   // have. A window reporting `cap === 0` is uncapped spend and does get a row.
-  if (credits?.fiveHour !== undefined) windows.push(windowView('fiveHour', credits.fiveHour))
-  if (credits?.weekly !== undefined) windows.push(windowView('weekly', credits.weekly))
+  if (credits?.fiveHour !== undefined) windows.push(windowView('fiveHour', credits.fiveHour, ratio))
+  if (credits?.weekly !== undefined) windows.push(windowView('weekly', credits.weekly, ratio))
 
   // Rotation/credential state: the serving account first, then the two marks
   // the pool can carry, then a cooldown whose end time is known.
@@ -381,9 +421,10 @@ function accountView(entry: CommandCodeAccountUsage, t: PanelTranslator): PanelA
     unconfigured: !entry.configured,
     periodEnds: dateText(plan?.currentPeriodEnd ?? 0),
     active: entry.active,
-    monthly: monthlyView(report),
+    monthly: monthlyView(report, ratio),
     windows,
     stats,
+    quotaModel,
     usagePeriod: usage === undefined ? '' : usageRange
       ? `${t('usageBillingPeriod')} ${usageRange}`
       : t('usagePeriodUnknown'),
@@ -443,7 +484,7 @@ export function buildPanelView(input: PanelViewInput): PanelView {
     seen.add(entry.id)
     return true
   })
-  const accounts = entries.map((entry) => accountView(entry, t))
+  const accounts = entries.map((entry) => accountView(entry, t, input.quotaModelName))
   const selectedEntry = entries.find((entry) => entry.active) ?? entries[0]
   const selectedView = accounts.find((view) => view.id === selectedEntry?.id)
 
@@ -452,6 +493,7 @@ export function buildPanelView(input: PanelViewInput): PanelView {
   // weekly. `barPercent` clamps the fill; the printed percentage keeps the true
   // consumption, so an over-cap window still reads 150%.
   const footerBars: PanelFooterBar[] = []
+  const footerRatio = quotaRatio(selectedEntry?.report.plan)
   const windowBars: Array<[PanelKey, WindowInput | undefined]> = [
     ['fiveHourShort', selectedEntry?.report.credits?.fiveHour],
     ['weeklyShort', selectedEntry?.report.credits?.weekly],
@@ -459,12 +501,14 @@ export function buildPanelView(input: PanelViewInput): PanelView {
   for (const [label, window] of windowBars) {
     if (window === undefined || window.cap <= 0) continue
     const percent = rawPercent(window.used, window.cap)
+    const used = quotaValue(window.used, footerRatio)
+    const cap = quotaValue(window.cap, footerRatio)
     footerBars.push({
       label,
       percent: `${percent}%`,
       barPercent: barPercent(percent),
       warn: window.exceeded,
-      detail: `${money(window.used)} / ${money(window.cap)}`,
+      detail: `${money(used)} / ${money(cap)}`,
     })
   }
 
@@ -486,11 +530,14 @@ export function buildPanelView(input: PanelViewInput): PanelView {
     const figures = bar.detail === '' ? '' : ` ${bar.detail}`
     titleParts.push(`${t(bar.label)}${figures} (${bar.percent})`)
   }
+  const quotaModel = selectedView?.quotaModel ?? ''
+  if (quotaModel !== '') titleParts.push(`${t('quotaModel')} ${quotaModel}`)
   if (cost !== '') titleParts.push(`${t('spend')} ${cost}`)
 
   return {
     text: panelStrings(t),
     planName,
+    quotaModel,
     status,
     footerBars,
     cost,

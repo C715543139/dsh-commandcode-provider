@@ -172,6 +172,19 @@ function parseUsageReport(value: unknown): CommandCodeUsageReport {
     if (plan.currentPeriodStart !== undefined) {
       report.plan.currentPeriodStart = numberField(plan, 'currentPeriodStart', 'plan.currentPeriodStart')
     }
+    // Display-only quota model (Go/GOAT/Pro per-model allowance). Optional on
+    // the wire so a cross-version Host that predates the setting simply keeps
+    // the raw credit figures; a present value must still be well-formed.
+    if (plan.quotaModel !== undefined) {
+      report.plan.quotaModel = stringField(plan, 'quotaModel', 'plan.quotaModel')
+    }
+    if (plan.quotaAllowance !== undefined) {
+      const allowance = numberField(plan, 'quotaAllowance', 'plan.quotaAllowance')
+      // A negative allowance is not a quota; reject rather than let a bad Host
+      // turn every surface into a negative dollar figure.
+      if (!Number.isFinite(allowance) || allowance < 0) reject('plan.quotaAllowance')
+      report.plan.quotaAllowance = allowance
+    }
   }
 
   return report

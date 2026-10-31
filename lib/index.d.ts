@@ -200,6 +200,15 @@ interface CommandCodeConnectionOptions {
    * 422 `cmd_zdr_no_providers`; never retry that request without the header.
    */
   zdr?: boolean;
+  /**
+   * Display-only quota model: catalog id whose per-model monthly allowance the
+   * quota surfaces use to express the plan's credits in dollars. It never
+   * affects routing or the chat model. `getUsage()` resolves it against each
+   * account's own plan tier and puts the result on the report (`plan.quotaModel`
+   * / `plan.quotaAllowance`), so the browser and `/commandcode` share one
+   * conversion. Unset keeps the raw plan credits.
+   */
+  quotaModel?: string | undefined;
 }
 /**
  * Resolve the durable attachment service, or undefined when the host does not
@@ -346,6 +355,19 @@ interface CommandCodePlan {
   currentPeriodEnd: number;
   /** 官方订阅账期起点，毫秒；旧宿主或未报告该字段时缺省。 */
   currentPeriodStart?: number;
+  /**
+   * The display-only quota model configured for this account (`Config.quotaModel`),
+   * echoed on the report so every surface knows which model the dollar figures
+   * describe. Absent when no model is selected.
+   */
+  quotaModel?: string;
+  /**
+   * That model's monthly allowance in USD for THIS account's plan, or absent
+   * when the plan publishes no per-model allowance (Provider/Max/unknown), the
+   * model has no allowance row, or no model is selected. The client only
+   * converts when this and {@link monthlyCredits} are both present and positive.
+   */
+  quotaAllowance?: number;
 }
 /**
  * Why every account endpoint failed at once (the report then carries no data
@@ -1306,6 +1328,8 @@ declare function subscriptionPlanInfo(planId: string): {
  * for the plan id and `/alpha/billing/credits` for the on-demand balances).
  */
 interface CommandCodeBillingAccess {
+  /** Normalized account plan id (`individual-goat`, `teams-pro`, …); undefined when unknown. */
+  planId?: string;
   /** Account plan tier weight on the {@link PLAN_ORDER} scale; undefined when the plan is unknown. */
   tierWeight: number | undefined;
   /**
@@ -2531,6 +2555,15 @@ interface Config {
    * adapter ignores it.
    */
   showSidebarQuota?: boolean;
+  /**
+   * Display-only quota model: a GOAT-plan catalog model id whose monthly
+   * allowance the quota surfaces use to express the plan's credits in dollars.
+   * It never affects routing, chat, or the model picker. Default/unset keeps
+   * the plan's raw credit figures (the historical display). The Host resolves
+   * the model's allowance against each account's own plan tier and attaches it
+   * to the usage report; see `src/quota-model.ts` for the ratio.
+   */
+  quotaModel?: string;
   /**
    * Whether requests enforce zero data retention: the provider then routes
    * them only through upstreams that keep no prompts/completions and never

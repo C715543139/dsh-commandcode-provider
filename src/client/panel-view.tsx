@@ -115,10 +115,15 @@ export interface CommandCodeFooterEntryProps extends PanelComponentProps, Sideba
 function usePanelView(props: PanelComponentProps): PanelView {
   const usage = props.useCommandCodeUsage((state) => state)
   const settings = props.useCommandCodeSettings((state) => state)
+  // The panel must label the model whose allowance the report applied, so it
+  // resolves the STORED id (never a staged draft) to the catalog's display name.
+  const stored = settings.quotaModelStored
+  const selected = stored === '' ? undefined : settings.catalogModels.find((entry) => entry.id === stored)
   return buildPanelView({
     usage,
     apiKeyConfigured: settings.anyAccountConfigured,
     t: props.t ?? panelTextEN,
+    quotaModelName: selected?.name ?? (stored === '' ? undefined : stored),
   })
 }
 
@@ -228,6 +233,9 @@ function AccountCard({ account, view }: { account: PanelAccountView; view: Panel
         <span className="ccp-spacer" />
         {account.planName !== '' ? <span className="ccp-badge">{account.planName}</span> : null}
         {account.planStatus !== '' ? <span className="ccp-badge ccp-badgeWarn">{account.planStatus}</span> : null}
+        {account.quotaModel !== '' ? (
+          <span className="ccp-badgeMuted" title={text('quotaModelHint')}>{account.quotaModel}</span>
+        ) : null}
         {mark !== '' ? (
           <span className={account.mark === 'invalidKey' ? 'ccp-badge ccp-badgeError' : 'ccp-badgeMuted'}>{mark}</span>
         ) : null}

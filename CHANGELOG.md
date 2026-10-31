@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **额度计算模型（GOAT 计划）**：设置页「集成与显示」新增「额度计算模型」，可从 GOAT 计划可用的付费模型中选择一个。侧栏额度卡片、点击卡片打开的额度页、设置页账户卡片和 `/commandcode` 会按官方积分比例把 Go/GOAT/Pro 的窗口用量换算成该模型的美元额度：月额度 A、5 小时 A/5、每周 A/2（GOAT 基准 70 积分，例如 $100 模型对应 $20 / $50 / $100）。该设置只影响展示，与聊天页选择的模型、账户路由和轮换完全无关；未选择时保持原积分显示。宿主按每个账户自己的套餐档位解析额度，旧宿主/旧客户端仍可互通。
+- **GOAT 月度额度同步**：`deepseek-v4.1-flash` 与 `glm-5.3-flash` 的 GOAT／Pro 月额度由 $80／$90 更新为 $100／$110（GOAT 计划页与定价页一致）；API 侧按模型价目表自动用于额度换算。
+
 ## [0.16.2] - 2026-10-30
 
 ### Changed

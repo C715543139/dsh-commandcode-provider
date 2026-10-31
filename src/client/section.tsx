@@ -40,6 +40,8 @@ import { allowlistedModels, buildModelSelectOptions, catalogIsReady, groupModelS
 import type { UsagePageState } from './usage.ts'
 import { usageCardState } from './usage.ts'
 import { compactCountTitle, formatCompactCount, formatMoney, formatMoneyExact, formatResetAtShort, formatSuccessRate, formatTokensCompact, windowRatio, formatUsageBillingPeriod } from '../display-format.ts'
+import { isGoatQuotaTier, quotaRatio, quotaValue } from '../quota-model.ts'
+import { PLAN_LABELS } from '../plan-tiers.ts'
 import { PLUGIN_RELEASES_URL, PLUGIN_VERSION } from './version.ts'
 import { checkForUpdate, localStorageUpdateStore } from './update.ts'
 import {
@@ -551,26 +553,30 @@ function UsageStat({ label, value, sub, title }: { label: string; value: string;
 function UsageWindow({
   label,
   limit,
+  scale,
   t,
 }: {
   label: string
   limit: NonNullable<CommandCodeCredits['fiveHour']>
+  /** Credits → the selected quota model's dollars; undefined keeps plan credits. */
+  scale?: number | undefined
   t: Translate<SettingsCommandCodeKey>
 }) {
-  const { used, cap, exceeded, resetAt } = limit
+  const used = quotaValue(limit.used, scale)
+  const cap = quotaValue(limit.cap, scale)
   const ratio = windowRatio(used, cap)
-  const reset = formatResetAtShort(resetAt)
+  const reset = formatResetAtShort(limit.resetAt)
   return (
     <div className="cc-usageWindow">
       <div className="cc-usageWindowHead">
         <span className="cc-usageWindowLabel">{label}</span>
-        {exceeded ? <span className="cc-usageExceeded">{t('usageExceeded')}</span> : null}
+        {limit.exceeded ? <span className="cc-usageExceeded">{t('usageExceeded')}</span> : null}
         <span className="cc-usageWindowValue">{cap > 0 ? `${formatMoney(used)} / ${formatMoney(cap)}` : formatMoney(used)}</span>
       </div>
       <div className="cc-usageBar" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ratio * 100)}>
         {/* Full width, shifted left by the unused share: a transform animates
             without layout and keeps the fill's rounded ends. */}
-        <div className={exceeded ? 'cc-usageBarFill cc-usageBarFillWarn' : 'cc-usageBarFill'} style={{ transform: `translateX(${(ratio - 1) * 100}%)` }} />
+        <div className={limit.exceeded ? 'cc-usageBarFill cc-usageBarFillWarn' : 'cc-usageBarFill'} style={{ transform: `translateX(${(ratio - 1) * 100}%)` }} />
       </div>
       {reset !== '' ? <p className="cc-usageWindowReset">{t('usageReset')} {reset}</p> : null}
     </div>
@@ -616,6 +622,9 @@ function AccountReport({ entry, fetchedAt, t, headless = false }: {
   const planStatus = plan !== undefined && plan.status !== '' && plan.status !== 'active' ? plan.status : ''
   const showPartial = report.failures.length > 0 && report.blocked === undefined
   const label = balanceLabelText(report, t)
+  // The Host resolved the display model against THIS account's plan; a defined
+  // ratio is the only case where the credit figures below are dollars.
+  const scale = quotaRatio(plan)
   const updatedText = fetchedAt === undefined
     ? ''
     : `${t('usageUpdated')} ${new Date(fetchedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
@@ -666,7 +675,7 @@ function AccountReport({ entry, fetchedAt, t, headless = false }: {
             </div>
             {credits !== undefined ? (
               <div className="cc-balanceRow">
-                <span className="cc-balanceValue">{monthlyKnown ? formatMoney(Math.max(0, credits.monthlyCredits)) : '—'}</span>
+                <span className="cc-balanceValue">{monthlyKnown ? formatMoney(Math.max(0, quotaValue(credits.monthlyCredits, scale))) : '—'}</span>
                 <span className="cc-balanceSub">
                   {`${t('usagePurchased')} ${credits.purchasedReported === false ? '—' : formatMoney(credits.purchasedCredits)} · ${t('usageFree')} ${credits.freeReported === false ? '—' : formatMoney(credits.freeCredits)}`}
                 </span>
@@ -710,10 +719,10 @@ function AccountReport({ entry, fetchedAt, t, headless = false }: {
       {credits?.fiveHour !== undefined || credits?.weekly !== undefined ? (
         <div className="cc-usageWindows">
           {credits.fiveHour !== undefined ? (
-            <UsageWindow label={t('usageFiveHour')} limit={credits.fiveHour} t={t} />
+            <UsageWindow label={t('usageFiveHour')} limit={credits.fiveHour} scale={scale} t={t} />
           ) : null}
           {credits.weekly !== undefined ? (
-            <UsageWindow label={t('usageWeekly')} limit={credits.weekly} t={t} />
+            <UsageWindow label={t('usageWeekly')} limit={credits.weekly} scale={scale} t={t} />
           ) : null}
         </div>
       ) : null}
@@ -958,6 +967,9 @@ function StatusStrip({ t, state, usage, snapshot, probe }: {
   const credits = defaultRow?.usage?.report?.credits
   const monthly = credits !== undefined && credits.monthlyReported !== false ? credits : undefined
   const depleted = monthly !== undefined && monthly.monthlyCredits <= 0
+  // The status cell reuses the account card's conversion: same report, same
+  // per-account ratio, so the two surfaces cannot disagree about the balance.
+  const scale = quotaRatio(defaultRow?.usage?.report.plan)
   const planName = defaultRow?.usage?.report?.plan?.name ?? ''
   const overridden = modelsOverriddenCount(state)
   const view = serviceStatusView(snapshot, probe, t, Date.now())
@@ -984,7 +996,7 @@ function StatusStrip({ t, state, usage, snapshot, probe }: {
           <span className={depleted ? 'cc-tabDot cc-tabDotError' : monthly !== undefined ? 'cc-tabDot cc-tabDotOk' : 'cc-tabDot cc-tabDotBlank'} aria-hidden="true" />
           <span className="cc-statusLabel">{t('usageMonthlyLeft')}</span>
         </span>
-        <span className="cc-statusStripValue">{monthly !== undefined ? formatMoney(Math.max(0, monthly.monthlyCredits)) : '—'}</span>
+        <span className="cc-statusStripValue">{monthly !== undefined ? formatMoney(Math.max(0, quotaValue(monthly.monthlyCredits, scale))) : '—'}</span>
         {credits !== undefined ? (
           <span className="cc-statusSub">{`${t('usagePurchased')} ${credits.purchasedReported === false ? '—' : formatMoney(credits.purchasedCredits)} · ${t('usageFree')} ${credits.freeReported === false ? '—' : formatMoney(credits.freeCredits)}`}</span>
         ) : null}
@@ -1446,6 +1458,73 @@ function localDotState(view: ServiceStatusView): StateDotState {
 }
 
 /**
+ * The display-only quota model: one GOAT-plan model whose monthly allowance the
+ * quota surfaces express the plan's credits in. It is deliberately separate from
+ * the chat model and every routing field — changing it writes only
+ * `quotaModel` and never affects which model serves a request.
+ *
+ * Options are restricted to models priced on the GOAT plan (minimum tier Go or
+ * GOAT) with a published monthly allowance; free models have no allowance and
+ * Pro/Max-first models are not part of GOAT. A stored id the catalog no longer
+ * carries stays visible as a stale option, so a saved choice never silently
+ * disappears. The Host resolves the chosen id against each account's own plan
+ * tier, so this list only decides WHICH model, not how the ratio is computed.
+ */
+function QuotaModelRow({ state, disabled, t, onEdit }: FormCardProps) {
+  const stored = state.quotaModel.text
+  const eligible = state.catalogModels.filter(
+    (model) => typeof model.allowance === 'number' && model.allowance > 0 && isGoatQuotaTier(model.tier),
+  )
+  const known = eligible.find((model) => model.id === stored)
+  const stale = stored !== '' && known === undefined
+  const group = (tier: 'goat' | 'go') => eligible.filter((model) => model.tier === tier)
+  const optionLabel = (model: CatalogModelOption): string => t('quotaModelOption', {
+    name: model.name,
+    allowance: t('modelAllowance', { amount: model.allowance ?? 0 }),
+  })
+  return (
+    <SettingRow
+      title={t('quotaModel')}
+      description={
+        <>
+          <p>{t('quotaModelHint')}</p>
+          {known !== undefined ? (
+            <p>{t('quotaModelCurrent', { model: known.name, allowance: t('modelAllowance', { amount: known.allowance ?? 0 }) })}</p>
+          ) : null}
+          {stale ? <p className="cc-rowError">{t('quotaModelStale')}</p> : null}
+        </>
+      }
+      control={
+        <span className="cc-contextSelect cc-quotaModelSelect">
+          <select
+            className="cc-fieldInput cc-contextModel"
+            aria-label={t('quotaModel')}
+            value={stored}
+            disabled={disabled}
+            onChange={(event) => onEdit('quotaModel', event.target.value)}
+          >
+            <option value="">{t('quotaModelNone')}</option>
+            {stale ? <option value={stored}>{`${stored} · ${t('modelStale')}`}</option> : null}
+            {(['goat', 'go'] as const).map((tier) => {
+              const models = group(tier)
+              if (models.length === 0) return null
+              return (
+                <optgroup key={tier} label={PLAN_LABELS[tier] ?? tier}>
+                  {models.map((model) => (
+                    <option key={model.id} value={model.id}>{optionLabel(model)}</option>
+                  ))}
+                </optgroup>
+              )
+            })}
+          </select>
+          <Icon name="chevron" className="cc-icon cc-contextCaret" />
+        </span>
+      }
+    />
+  )
+}
+
+/**
  * Integrations & display: surfaces outside chat that reuse this provider. The
  * status snapshot comes from the page, which probes once per open even while
  * this group is folded — its heading shows the verdict either way.
@@ -1495,6 +1574,9 @@ function IntegrationsCard({ state, disabled, t, onEdit, onReset, expanded, onTog
         onReset={() => onReset('showSidebarQuota')}
         t={t}
       />
+      {/* Display-only and independent of the chat model: the chosen model's
+          monthly allowance turns the plan's credits into that model's dollars. */}
+      <QuotaModelRow state={state} disabled={disabled} t={t} onEdit={onEdit} onReset={onReset} />
     </FoldableGroup>
   )
 }
@@ -1693,11 +1775,11 @@ function statusDotTitle(row: AccountRowModel, t: Translate<SettingsCommandCodeKe
 }
 
 /** One compact quota meter for a row's summary line. */
-function MiniMeter({ label, limit }: { label: string; limit: NonNullable<CommandCodeCredits['fiveHour']> }) {
+function MiniMeter({ label, limit, scale }: { label: string; limit: NonNullable<CommandCodeCredits['fiveHour']>; scale?: number | undefined }) {
   const ratio = windowRatio(limit.used, limit.cap)
-  const percent = limit.cap > 0 ? `${Math.round(ratio * 100)}%` : formatMoney(limit.used)
+  const percent = limit.cap > 0 ? `${Math.round(ratio * 100)}%` : formatMoney(quotaValue(limit.used, scale))
   return (
-    <span className="cc-miniMeter" title={limit.cap > 0 ? `${formatMoney(limit.used)} / ${formatMoney(limit.cap)}` : undefined}>
+    <span className="cc-miniMeter" title={limit.cap > 0 ? `${formatMoney(quotaValue(limit.used, scale))} / ${formatMoney(quotaValue(limit.cap, scale))}` : undefined}>
       <span className="cc-miniMeterLabel">{label}</span>
       <span className="cc-miniMeterTrack" aria-hidden="true">
         <span className={limit.exceeded ? 'cc-miniMeterFill cc-usageBarFillWarn' : 'cc-miniMeterFill'} style={{ transform: `translateX(${(ratio - 1) * 100}%)` }} />
@@ -1711,11 +1793,11 @@ function MiniMeter({ label, limit }: { label: string; limit: NonNullable<Command
  * The monthly credit balance for a row's summary line: the billing endpoint's
  * `monthlyCredits` is what is LEFT, shown as the amount alone.
  */
-function MonthlyBalance({ label, remaining }: { label: string; remaining: number }) {
+function MonthlyBalance({ label, remaining, scale }: { label: string; remaining: number; scale?: number | undefined }) {
   return (
     <span className="cc-miniMeter">
       <span className="cc-miniMeterLabel">{label}</span>
-      <span className="cc-miniMeterValue">{formatMoney(Math.max(0, remaining))}</span>
+      <span className="cc-miniMeterValue">{formatMoney(Math.max(0, quotaValue(remaining, scale)))}</span>
     </span>
   )
 }
@@ -1825,6 +1907,13 @@ function AccountItem({ row, rows, state, usage, login, disabled, pinned, t, acti
   // Only an explicit `false` means the balance was omitted (an older Host
   // never sends the flag and always sent a real number).
   const monthlyReported = credits !== undefined && credits.monthlyReported !== false
+  // The Host applies the display model per account; show the catalog's name for
+  // the id it echoed. A stored draft alone never changes these figures.
+  const scale = quotaRatio(report?.plan)
+  const quotaModelId = scale === undefined ? '' : (report?.plan?.quotaModel ?? '')
+  const quotaModelName = quotaModelId === ''
+    ? undefined
+    : (state.catalogModels.find((model) => model.id === quotaModelId)?.name ?? quotaModelId)
   const multi = rows.length > 1
   const loginTarget = row.ref
   const { visible: loginState, busyElsewhere } = loginStateForTarget(login, loginTarget)
@@ -1891,6 +1980,9 @@ function AccountItem({ row, rows, state, usage, login, disabled, pinned, t, acti
           <span className="cc-accountName">{row.label}</span>
           {accountName !== '' && accountName !== row.label ? <span className="cc-usageAccount">{accountName}</span> : null}
           {planName !== '' ? <span className="cc-badge cc-badgeOutline">{planName}</span> : null}
+          {quotaModelName !== undefined ? (
+            <span className="cc-badge cc-badgeOutline" title={t('quotaModelHint')}>{quotaModelName}</span>
+          ) : null}
           {entry?.active && multi ? <span className="cc-badge cc-badgeOk">{t('usageActive')}</span> : null}
           {pinned ? <span className="cc-badge">{t('accountStatusPinned')}</span> : null}
           {!row.credentialKnown || !row.configured ? <span className="cc-badge cc-badgeOutline">{t(row.credentialKnown ? 'apiKeyUnset' : 'writeStateUnknown')}</span> : null}
@@ -1932,10 +2024,10 @@ function AccountItem({ row, rows, state, usage, login, disabled, pinned, t, acti
           the same windows as full bars, so the summary steps aside. */}
       {!expanded && credits !== undefined && (credits.fiveHour !== undefined || credits.weekly !== undefined || monthlyReported) ? (
         <div className="cc-accountMeters">
-          {credits.fiveHour !== undefined ? <MiniMeter label={t('usageFiveHour')} limit={credits.fiveHour} /> : null}
-          {credits.weekly !== undefined ? <MiniMeter label={t('usageWeekly')} limit={credits.weekly} /> : null}
+          {credits.fiveHour !== undefined ? <MiniMeter label={t('usageFiveHour')} limit={credits.fiveHour} scale={scale} /> : null}
+          {credits.weekly !== undefined ? <MiniMeter label={t('usageWeekly')} limit={credits.weekly} scale={scale} /> : null}
           {monthlyReported ? (
-            <MonthlyBalance label={t('usageMonthlyLeft')} remaining={credits.monthlyCredits} />
+            <MonthlyBalance label={t('usageMonthlyLeft')} remaining={credits.monthlyCredits} scale={scale} />
           ) : null}
         </div>
       ) : null}

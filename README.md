@@ -33,7 +33,7 @@ Unofficial [DeepSeek Harness](https://deepseek-harness.github.io/deepseek-harnes
 - **Annotated catalog** — plan tier, deal/`FREE` badge, peak/off-peak, image support and context window in the picker; free models first.
 - **Multi-account rotation** — an exhausted account hands over to the next one; pin a preferred account or route models to dedicated ones.
 - **Browser sign-in** — run the official authorization flow from the settings page; the approved key lands in the local credential store.
-- **Plans & quota panel** — optional sidebar card with the serving account's plan, 5-hour and weekly windows, balances and reset times.
+- **Plans & quota panel** — optional sidebar card with the serving account's plan, 5-hour and weekly windows, balances and reset times. Choose a GOAT-plan model in settings to express Go/GOAT/Pro credits in that model's dollar allowance (independent of the chat model).
 - **Session cost estimate** — published-rate estimates (`≈`) beside the composer token counter, priced per request from durable session history.
 - **Model analysis** — tokens, estimated cost, response timing and failures by session or date range. [Scope](docs/模型成本与性能分析.md).
 - **Web search** — the dsh `web_search` tool is served by Command Code (`/alpha/web-search`) with the same key and endpoint as chat.
@@ -169,7 +169,7 @@ Each account row shows its plan, status and 5-hour/weekly meters; expand it for 
 
 ## Configure
 
-**Settings → Command Code** groups the options as **Accounts** (keys, sign-in, live quota, pinning, dedicated models), **Models & context** (out-of-plan filter, visible models, context length, output limit), **Privacy & security** (zero data retention), **Integrations & display** (web search, sidebar quota card) and **Advanced** (API base URL, timeouts, transport retries, image offload). The same options live in `$DSH_HOME/settings.yaml` and apply immediately, without a restart:
+**Settings → Command Code** groups the options as **Accounts** (keys, sign-in, live quota, pinning, dedicated models), **Models & context** (out-of-plan filter, visible models, context length, output limit), **Privacy & security** (zero data retention), **Integrations & display** (web search, sidebar quota card, quota calculation model) and **Advanced** (API base URL, timeouts, transport retries, image offload). The same options live in `$DSH_HOME/settings.yaml` and apply immediately, without a restart:
 
 ```yaml
 llm-commandcode:
@@ -191,6 +191,7 @@ llm-commandcode:
   streamIdleTimeoutMs: 300000           # default 300s
   # offloadSeenImagesForCache: true     # opt in to CLI cache mitigation
   showSidebarQuota: true                 # optional: sidebar plans & quota card (default off)
+  # quotaModel: deepseek/deepseek-v4.1-flash  # optional: express Go/GOAT/Pro quota in this GOAT model's allowance
   zdr: true                              # optional: zero-data-retention upstreams only (default off)
   # contextWindow: 131072                # optional: custom context length for every model
   # contextWindowOverrides:              # optional: per-model context lengths; wins over contextWindow

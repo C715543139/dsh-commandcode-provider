@@ -104,6 +104,44 @@ test('getUsage parses account, usage, and credits', async () => {
   assert.equal(report.plan?.currentPeriodEnd, Date.parse('2026-09-01T00:00:00Z'))
 })
 
+test('the command reports quota-model-converted balances', async () => {
+  const adapter = new CommandCodeAdapter({
+    options: () => ({
+      apiBase: 'https://api.commandcode.ai',
+      workingDir: '/tmp',
+      modelsCachePath: '/tmp/cache.json',
+      requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
+      streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+      quotaModel: 'deepseek/deepseek-v4.1-flash',
+    }),
+    resolveApiKey: async () => 'user_test_key',
+    fetchImpl: makeFetch({
+      '/alpha/whoami': { status: 200, body: { user: { id: 'u1', name: 'A', userName: 'a' } } },
+      '/alpha/billing/subscriptions': { status: 200, body: { data: { planId: 'individual-goat', status: 'active' } } },
+      '/alpha/billing/credits': {
+        status: 200,
+        body: {
+          credits: { monthlyCredits: 46.92, purchasedCredits: 0, freeCredits: 0 },
+          windowLimits: {
+            fiveHour: { used: 1, cap: 14, exceeded: false, resetAt: 0 },
+            weekly: { used: 1.32, cap: 35, exceeded: false, resetAt: 0 },
+          },
+        },
+      },
+      '/alpha/usage/summary': { status: 200, body: { totalCount: 1 } },
+    }),
+  })
+  const def = commandDefinition({ adapter, getLocale: () => 'en' })
+  const result = await invoke(def, '')
+  assert.equal(result.kind, 'success')
+  // The model id and allowance are named once, then every plan-credit figure
+  // is presented in that model's dollars (GOAT: ×100/70).
+  assert.ok(result.text.includes('expressed in deepseek/deepseek-v4.1-flash usage ($100.00/mo)'), result.text)
+  assert.ok(result.text.includes('$67.03'), result.text)
+  assert.ok(result.text.includes('5-hour   $1.43 / $20.00'), result.text)
+  assert.ok(result.text.includes('Weekly   $1.89 / $50.00'), result.text)
+})
+
 test('getUsage resolves the plan id from credits when subscriptions fails', async () => {
   const adapter = makeAdapter(makeFetch({
     '/alpha/whoami': { status: 200, body: { success: true, user: { id: 'u1', name: 'N', userName: 'n' } } },

@@ -2966,6 +2966,9 @@ test('allowanceTier() answers the pool\'s highest allowance bracket', async () =
   assert.equal(await bracket('individual-go-v1'), 'go')
   assert.equal(await bracket('individual-max'), undefined)
   assert.equal(await bracket('individual-provider'), undefined)
+  // Teams Pro reuses Pro's tierWeight for ordering but publishes no per-model
+  // allowance; it must not borrow Pro's bracket.
+  assert.equal(await bracket('teams-pro'), undefined)
   // Fail-open shape, as everywhere else in this plugin: unreadable billing
   // hides the allowance rather than inventing one.
   const { fetchImpl } = fetchRouting({
@@ -7605,6 +7608,70 @@ test('用量卡片与选择器共享同一份账户事实，但用量汇总必�
   assert.equal(second.usage?.totalCount, 2, '用量汇总不能回放上一次的响应')
   const usageCalls = calls.filter((call) => call.path === '/alpha/usage/summary')
   assert.equal(usageCalls.length, 2)
+})
+
+test('getUsage() resolves the display quota model against this account’s plan', async () => {
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    if (url.pathname === '/alpha/whoami') return Response.json({ user: { id: 'u1' }, org: { id: 'org1' } })
+    if (url.pathname === '/alpha/billing/subscriptions') {
+      return Response.json({ data: { planId: 'individual-goat', status: 'active' } })
+    }
+    if (url.pathname === '/alpha/billing/credits') return Response.json({ credits: { monthlyCredits: 10 } })
+    return Response.json({ totalCount: 1 })
+  }) as typeof fetch
+  const base = {
+    apiBase: 'https://api.commandcode.ai',
+    workingDir: '/tmp/project',
+    modelsCachePath: '/tmp/cc-models-cache.json',
+    requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
+    streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  }
+  const withModel = makeAdapter({
+    options: () => ({ ...base, quotaModel: 'deepseek/deepseek-v4.1-flash' }),
+    fetchImpl,
+  })
+  const report = await withModel.getUsage('user_test_key')
+  assert.equal(report.plan?.name, 'GOAT')
+  assert.equal(report.plan?.quotaModel, 'deepseek/deepseek-v4.1-flash')
+  // The synced GOAT allowance for this model is $100.
+  assert.equal(report.plan?.quotaAllowance, 100)
+
+  // A plan with no per-model allowance (Max) still names the configured model
+  // but cannot produce a ratio; the client then keeps the raw credits.
+  const maxAdapter = makeAdapter({
+    options: () => ({ ...base, quotaModel: 'deepseek/deepseek-v4.1-flash' }),
+    fetchImpl: (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/alpha/whoami') return Response.json({ user: { id: 'u1' }, org: { id: 'org1' } })
+      if (url.pathname === '/alpha/billing/subscriptions') {
+        return Response.json({ data: { planId: 'individual-max', status: 'active' } })
+      }
+      if (url.pathname === '/alpha/billing/credits') return Response.json({ credits: { monthlyCredits: 10 } })
+      return Response.json({ totalCount: 1 })
+    }) as typeof fetch,
+  })
+  const maxReport = await maxAdapter.getUsage('user_test_key')
+  assert.equal(maxReport.plan?.quotaModel, 'deepseek/deepseek-v4.1-flash')
+  assert.equal(maxReport.plan?.quotaAllowance, undefined)
+
+  // Teams Pro shares tierWeight 2 with Pro for picker ordering, but it bills
+  // 1 credit = $1 and publishes no per-model allowances; it must not convert.
+  const teamsAdapter = makeAdapter({
+    options: () => ({ ...base, quotaModel: 'deepseek/deepseek-v4.1-flash' }),
+    fetchImpl: (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/alpha/whoami') return Response.json({ user: { id: 'u1' }, org: { id: 'org1' } })
+      if (url.pathname === '/alpha/billing/subscriptions') {
+        return Response.json({ data: { planId: 'teams-pro', status: 'active' } })
+      }
+      if (url.pathname === '/alpha/billing/credits') return Response.json({ credits: { monthlyCredits: 10 } })
+      return Response.json({ totalCount: 1 })
+    }) as typeof fetch,
+  })
+  const teamsReport = await teamsAdapter.getUsage('user_test_key')
+  assert.equal(teamsReport.plan?.name, 'Teams Pro')
+  assert.equal(teamsReport.plan?.quotaAllowance, undefined)
 })
 
 test('getUsage() 个人账号使用毫秒账期，不附带组织参数或重算自然月', async () => {

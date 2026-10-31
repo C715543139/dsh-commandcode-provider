@@ -260,6 +260,9 @@ export const PAGE_CSS = `
 .cc-contextModel{box-sizing:border-box;appearance:none;-webkit-appearance:none;width:100%;padding-inline-end:30px;text-overflow:ellipsis;cursor:pointer}
 .cc-contextCaret{position:absolute;inset-inline-end:10px;top:50%;color:var(--dsw-alias-label-tertiary);transform:translateY(-50%);pointer-events:none}
 .cc-contextSelect:has(.cc-contextModel:disabled) .cc-contextCaret{opacity:.6}
+/* The quota-model select reuses the context-select chrome; keep it wide enough
+   for a long model name without letting it push the row's label out. */
+.cc-quotaModelSelect{width:min(280px,100%);min-width:180px}
 .cc-contextItem>.cc-unitBox{width:100%}
 .cc-contextError{grid-column:1/-1}
 .cc-tabDot{flex-shrink:0;width:8px;height:8px;border-radius:50%;corner-shape:round}

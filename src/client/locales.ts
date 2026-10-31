@@ -58,6 +58,12 @@ export type SettingsCommandCodeKey =
   | 'webSearchHint'
   | 'showSidebarQuota'
   | 'showSidebarQuotaHint'
+  | 'quotaModel'
+  | 'quotaModelHint'
+  | 'quotaModelNone'
+  | 'quotaModelOption'
+  | 'quotaModelCurrent'
+  | 'quotaModelStale'
   | 'zdr'
   | 'zdrHint'
   | 'accountsTitle'
@@ -311,6 +317,12 @@ export const zh: Record<SettingsCommandCodeKey, string> = {
   webSearchHint: '用同一密钥承载 dsh 的 web_search；「网页搜索」里已指定其他后端时本开关不生效。',
   showSidebarQuota: '在侧边栏显示额度卡片',
   showSidebarQuotaHint: '在侧边栏底部显示套餐与额度卡片，点击打开完整仪表盘；关闭时不在后台刷新用量。',
+  quotaModel: '额度计算模型',
+  quotaModelHint: '从 GOAT 计划可用的模型中选择一个，额度卡片和额度页会按它的每月额度换算成美元；与聊天页选择的模型无关。不选择时沿用计划积分原值。',
+  quotaModelNone: '不换算（计划积分原值）',
+  quotaModelOption: '{name}（{allowance}）',
+  quotaModelCurrent: '当前按 {model} 的 {allowance} 额度换算。',
+  quotaModelStale: '已保存的模型不在 GOAT 可用列表；额度换算可能不生效，可重新选择或清除。',
   zdr: '零数据保留（ZDR）',
   zdrHint: '仅使用不留存、不训练的上游；可用模型可能更少且价格通常更高。',
   accountsTitle: '账户',
@@ -587,6 +599,12 @@ export const en: Record<SettingsCommandCodeKey, string> = {
   webSearchHint: 'Use the same key for dsh web search. No effect while the Web search settings pin another backend.',
   showSidebarQuota: 'Show the quota card in the sidebar',
   showSidebarQuotaHint: 'Show a plan and quota card at the bottom of the sidebar that opens the full dashboard; while off, nothing refreshes in the background.',
+  quotaModel: 'Quota calculation model',
+  quotaModelHint: 'Pick a model available on the GOAT plan; the quota card and page then express usage in its monthly allowance. Independent of the chat model. Leaving it empty keeps the plan’s raw credits.',
+  quotaModelNone: 'No conversion (raw plan credits)',
+  quotaModelOption: '{name} ({allowance})',
+  quotaModelCurrent: 'Currently expressed in {model} ({allowance}).',
+  quotaModelStale: 'The saved model is not in the GOAT list; conversion may not apply. Pick another model or clear it.',
   zdr: 'Zero data retention (ZDR)',
   zdrHint: 'Use only upstreams that retain no data and do not train on requests; availability and pricing may differ.',
   accountsTitle: 'Accounts',

@@ -183,6 +183,28 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   caveat as a tooltip. Deals are already baked into these figures — MiniMax M3's
   `$47 / $57` is its 2× promotion folded in, and the pricing page says so in
   prose, which is what `tests/model-prices.test.ts` checks the snapshot against.
+- **Display-only quota model (credits → one model’s dollars)**: Go、GOAT、Pro
+  的窗口额度接口返回的是“积分”，不是美元。官网 Usage Limits 的换算规则是：
+  套餐基准积分 `plan.monthlyCredits`（GOAT 70、Pro-v1 80、Go 10）对应模型每月
+  额度 A 的美元用量；1 美元该模型用量消耗 `base / A` 积分，因此
+  `美元 = 积分 × A / base`。GOAT 的 14 积分 5 小时窗口在 $100 模型上是 $20、
+  在 $70 模型上是 $14；35 积分每周窗口对应 $50 / $35，与
+  [GOAT 计划页](https://commandcode.ai/docs/plans/goat) 的说明一致。
+  设置页 **集成与显示 → 额度计算模型** 只列 GOAT 可用的付费模型（最低套餐
+  Go／GOAT，且有月度额度；免费模型和 Pro/Max 专属模型不列），写入
+  `Config.quotaModel`；它与聊天模型、`modelAccountRules`、轮换和请求路由完全无关。
+  宿主在 `getUsage()` 里按每个账户自己的套餐档位解析 A，把
+  `plan.quotaModel` 与 `plan.quotaAllowance` 附在报告上，浏览器与
+  `/commandcode` 共用同一份换算：侧栏卡片、额度页、设置页账户卡片、状态条和命令
+  的 5 小时／每周／月额度都使用 A 的美元值；月额度上限显示 A，5 小时上限 A/5，
+  每周上限 A/2。百分比不变（分子分母同比缩放）。已购／赠送积分是额外按模型成本
+  购买的额度，不参与这个比例。未选择模型、套餐无按模型额度（Provider/Max/
+  Teams/未知）或模型无额度行时，报告省略 `quotaAllowance`，所有界面保持原来的
+  积分原值显示（旧 UI 行为）。`src/quota-model.ts` 是纯模块，客户端也打包它；
+  报告字段是严格远端上的可选扩展，旧宿主/旧客户端仍可互通。**Teams Pro 例外**：
+  它在 `KNOWN_SUBSCRIPTION_PLANS` 里与 Pro 同为 tierWeight 2（选择器排序需要），
+  但没有按模型额度；`allowanceTier()` 与 `getUsage()` 都要求 planId 以
+  `individual-` 开头，Teams Pro 不会借用 Pro 的额度。
 - **Price table Remote (`commandcode/prices`)**: `src/model-prices.ts` vendors
   the official per-token rates and serves them Host-side over the SAME
   `commandcodeUsage` service and one combined contribution (report + catalog +

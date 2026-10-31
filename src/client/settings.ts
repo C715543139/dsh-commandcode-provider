@@ -170,6 +170,18 @@ export interface SettingsPageState {
   webSearch: StagedField
   /** showSidebarQuota draft; `''` = "inherit the default" (off — the card is opt-in). */
   showSidebarQuota: StagedField
+  /**
+   * Display-only quota model draft: a GOAT-plan catalog id whose monthly
+   * allowance the quota surfaces use to express the plan's credits in dollars.
+   * `''` = no conversion (the historical raw-credit display). Independent of
+   * the chat model and of every routing field.
+   */
+  quotaModel: StagedField
+  /**
+   * The STORED quota model (never the staged draft), for the sidebar/panel
+   * badge: a draft must not change the surface before Save.
+   */
+  quotaModelStored: string
   /** zdr draft; `''` = "inherit the default" (off — ZDR is opt-in). */
   zdr: StagedField
   /**
@@ -438,6 +450,9 @@ const SECTION_FIELDS: FieldSpec[] = [
   booleanField('filterModelsByPlan'),
   booleanField('webSearch'),
   booleanField('showSidebarQuota'),
+  // 展示用额度模型：存目录 id，空串表示不换算（沿用原始积分显示）。与聊天
+  // 模型和任何路由字段无关；真正的额度换算由宿主按账户套餐档位解析。
+  textField('quotaModel'),
   booleanField('zdr'),
 ]
 
@@ -553,8 +568,12 @@ export class CommandCodeSettingsController {
       filterModelsByPlan: this.field('filterModelsByPlan'),
       webSearch: this.field('webSearch'),
       showSidebarQuota: this.field('showSidebarQuota'),
+      quotaModel: this.field('quotaModel'),
       zdr: this.field('zdr'),
       sidebarQuota: this.sectionValue('showSidebarQuota') === true,
+      quotaModelStored: typeof this.sectionValue('quotaModel') === 'string'
+        ? (this.sectionValue('quotaModel') as string).trim()
+        : '',
       activeAccount: typeof active === 'string' ? active : '',
       accounts,
       accountModels: Object.fromEntries(accountModelMap(this.storedRules())),
