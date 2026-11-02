@@ -4,7 +4,7 @@
  * subscription-plan labels, deals, and hourly (peak/off-peak) pricing.
  *
  * Everything here is synced from official sources — the command-code CLI
- * bundle's model table (`dist/cli.mjs`, re-verified at command-code@1.88.1), the
+ * bundle's model table (`dist/cli.mjs`, re-verified at command-code@1.88.2), the
  * live model catalog (`GET /provider/v1/models?view=client`, the authority for
  * capability fields since 1.82.4), and the official plan/pricing/model docs; see
  * the dsh-commandcode-upstream skill for the extraction procedures. The
@@ -26,7 +26,11 @@
  * step and `$2/$7.5` beyond. The 2026-10-28 check moves the constant to 1.88.1,
  * whose registry now names both catalog-only rows (Kimi K3.1 Pro and GPT-6.1
  * Terra) with efforts and context identical to this snapshot, so no table
- * changes. Keeping the snapshot in its own module
+ * changes. The 2026-10-31 check moves it to 1.88.2 — the npm package's own
+ * CHANGELOG names its sole change as a launch-crash fix after a fresh install
+ * or update — and again leaves every table here identical; that round's only
+ * data change is two per-model allowances in ./model-prices.ts. Keeping the
+ * snapshot in its own module
  * confines those frequent sync diffs here: src/adapter.ts holds only the stable
  * wire/runtime logic. The read helpers live here too, for the same reason.
  *
@@ -39,7 +43,7 @@ import { PLAN_LABELS, PLAN_ORDER } from './plan-tiers.ts'
 export { PLAN_LABELS, PLAN_ORDER } from './plan-tiers.ts'
 
 export const KNOWN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  // Re-verified against the authoritative command-code@1.88.1 model table. From
+  // Re-verified against the authoritative command-code@1.88.2 model table. From
   // 1.82.4 the CLI no longer keeps this map bundled: `getSupportedEfforts()`
   // resolves it through the model catalog (`reasoningEfforts`), served live at
   // `GET /provider/v1/models?view=client` and falling back to an embedded
@@ -115,7 +119,7 @@ export const KNOWN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // command-code@1.39.3; it previously reasoned automatically with no levels.
   'moonshotai/Kimi-K3': ['low', 'high', 'max'],
   // 2026-10-24 (catalog-only sync): the 1.88.0 artifact does not name Kimi K3.1
-  // Pro (1.88.1 does, with the same levels), and `?view=client` serves
+  // Pro (1.88.2 does, with the same levels), and `?view=client` serves
   // `reasoningEfforts:["low","high","max"]` and the pricing page carries
   // `caps.reasoning: true`. Same three-level set as its K3 predecessor; do not
   // inherit future levels from it without re-checking.
@@ -201,7 +205,7 @@ export const KNOWN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // 2026-10-27 (catalog-only sync): `?view=client` serves
   // `reasoningEfforts:["low","medium","high","xhigh","max"]` and the pricing
   // page carries `caps.reasoning: true`; the 1.88.0 artifact does not name the
-  // row (1.88.1 does, with the same levels). Same five-level set as its
+  // row (1.88.2 does, with the same levels). Same five-level set as its
   // `gpt-6.1-sol` predecessor; do not inherit future levels without
   // re-checking the catalog.
   'gpt-6.1-terra': ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -212,6 +216,14 @@ export const KNOWN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // this file any more. Three selectable levels, text-only input, Go tier —
   // like its `mistral-large-4` neighbour, and unlike the free stealth previews.
   'inclusionai/ling-3.1-flash': ['low', 'medium', 'high'],
+  // 2026-11-02 (catalog-only sync; the 1.88.2 artifact's registry does not name
+  // the row yet): `inclusionai/ling-3.1-flash-1019:free`, the free 1M-context
+  // twin of `ling-3.1-flash`. The `:free` suffix does NOT flatten the levels —
+  // this promo is served with `reasoningEfforts:["low","medium","high"]`, unlike
+  // the retired `ling-3.1-flash:free` — and its capability fields come from
+  // `?view=client` as usual. Text-only input (see `KNOWN_IMAGE_MODELS`) and Go
+  // tier (see `KNOWN_PLANS`).
+  'inclusionai/ling-3.1-flash-1019:free': ['low', 'medium', 'high'],
   // command-code@1.75.0 ("Add Mistral Large 4") — the only model the 1.74.3 ->
   // 1.77.0 train added. A three-level set; Vision per the official registry and
   // the CLI's inputModalities:["text","image"] (see `KNOWN_IMAGE_MODELS`), and
@@ -851,7 +863,7 @@ export const DEFAULT_MESSAGES_MAX_TOKENS = 64_000
  * `/docs/plans/max` and `/docs/resources/pricing-limits`). Each plan's model
  * list is a superset of the one below it: Go ⊂ GOAT ⊂ Pro ⊂ Provider/Max.
  * Models absent from every plan list (Claude Opus/Fable, Fugu Ultra) are
- * Provider-tier. Re-verified at command-code@1.88.1 (2026-10-28) against the
+ * Provider-tier. Re-verified at command-code@1.88.2 (2026-10-31) against the
  * live `?view=client` catalog: 106 ids, still a strict superset chain. Mistral
  * Large 4 (1.75.0) was the only addition at the 1.77.0 check; the 1.78.0/1.79.0 pair
  * added Claude Haiku 5.5 at Pro and the free Glyph Cluster preview at Go.
@@ -923,6 +935,10 @@ export const KNOWN_PLANS: Readonly<Record<string, string>> = {
   // grants every tier (individual-go through teams-pro) — the "all":true shape
   // shared with its `ling-3.0-flash-sante:free` predecessor.
   'inclusionai/ling-3.1-flash': 'go',
+  // 2026-11-02; the free 1019 promo row is Go on every source — `minimumPlan:
+  // "individual-go"` in `?view=client` and the pricing page's embedded
+  // availability grants every tier (the same "all":true shape as its sibling).
+  'inclusionai/ling-3.1-flash-1019:free': 'go',
   // command-code@1.44.0; on every plan including Go, like its 1.2 Contributor
   // sibling.
   'meta/muse-spark-1.2-contributor': 'go',
@@ -1248,6 +1264,18 @@ export interface KnownDeal {
 
 export const KNOWN_DEALS: Readonly<Record<string, KnownDeal>> = {
   'MiniMaxAI/MiniMax-M3': { label: '50% off' },
+  // 2026-11-02 (catalog-only sync): `inclusionai/ling-3.1-flash-1019:free` is
+  // 100% off through `2026-11-03T16:00Z` ("until 16:00 UTC on November 3") with
+  // a 100-requests-a-day cap. Unlike the retired `ling-3.1-flash:free`, the row
+  // is served by the default catalog view, the pricing page and every plan page,
+  // so it gets a badge — and because this promo publishes its end date, it is
+  // left to lapse through `expiresAt` instead of being deleted like the undated
+  // previews.
+  'inclusionai/ling-3.1-flash-1019:free': {
+    label: 'FREE',
+    free: true,
+    expiresAt: '2026-11-03T16:00:00Z',
+  },
   // `minimax/minimax-m3.1-flash:free` (the 2026-10-20 dated launch promo, 100%
   // off through `2026-10-22T10:45Z`) left this map on 2026-10-23: the promo
   // lapsed, the row went `hidden` in `?view=client`, and it is gone from the

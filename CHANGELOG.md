@@ -11,6 +11,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **额度计算模型（GOAT 计划）**：设置页「集成与显示」新增「额度计算模型」，可从 GOAT 计划可用的付费模型中选择一个。侧栏额度卡片、点击卡片打开的额度页、设置页账户卡片和 `/commandcode` 会按官方积分比例把 Go/GOAT/Pro 的窗口用量换算成该模型的美元额度：月额度 A、5 小时 A/5、每周 A/2（GOAT 基准 70 积分，例如 $100 模型对应 $20 / $50 / $100）。该设置只影响展示，与聊天页选择的模型、账户路由和轮换完全无关；未选择时保持原积分显示。宿主按每个账户自己的套餐档位解析额度，旧宿主/旧客户端仍可互通。
 - **GOAT 月度额度同步**：`deepseek-v4.1-flash` 与 `glm-5.3-flash` 的 GOAT／Pro 月额度由 $80／$90 更新为 $100／$110（GOAT 计划页与定价页一致）；API 侧按模型价目表自动用于额度换算。
 
+## [0.16.4] - 2026-11-02
+
+### Added
+
+- **新增免费模型 Ling 3.1 Flash 1019（`inclusionai/ling-3.1-flash-1019:free`，服务端目录先行）。** `?view=client` 的 `catalogVersion` 由 `7f405e24…` 变为 `f3a51355…`，默认目录 94 → 95、client 视图 106 → 107，唯一新增行是 Ling 3.1 Flash 1019：1,000,000 上下文、262,144 输出上限、纯文本输入、推理档位 `low`／`medium`／`high`、Go 档、ZDR 覆盖、`/chat/completions` 端点；100% 免费促销自 `2026-10-29T16:00Z` 起至 `2026-11-03T16:00Z`（北京时间 11-04 00:00 到期），每账号每天 100 次请求。官方 models、pricing 与 go／goat／pro／max 计划页均已上架；`1.88.2` 产物注册表尚未收录该行（审计报 `absent from CLI registry`，与 `gpt-6.1-terra` 的目录先行形态一致）。快照 +1：`KNOWN_PLANS` 94 → 95、`KNOWN_EFFORTS` 67 → 68、`KNOWN_DEALS` 4 → 5（带 `expiresAt`，到期后 FREE 徽标自动消失，不跟随下架）；`KNOWN_IMAGE_MODELS`（73）、`KNOWN_THINKING_MODELS`（16）、`KNOWN_NON_ZDR_MODELS`（18）、订阅表（9）、峰值定价（5）、内置价格行（94）与输出上限表（79）均不变——免费行照旧不进价格表，`MODEL_OUTPUT_TOKEN_LIMITS` 也不含 Ling 行（走 chat/completions）。`COMMAND_CODE_CLI_VERSION` 保持 `1.88.2`。**验证**：`typecheck` 退出码 0，`npm test` 1156／1156（扩展既有快照断言，未新增用例），`build` 两段 `Build complete`；本轮仅公开 GET 采集（14 个源全部 HTTP 200），未做真实账号登录、付费生成与服务端协议验证。
+
+### Fixed
+
+- **账户余额为 0 时提示指向错误方向（2026-10-31 实测）。** 上游对 `POST /provider/v1/chat/completions` 返回 `400`，正文为 `You have insufficient credits to make this request…`、结构化代码只有 `BAD_REQUEST`；插件已能据此把账号轮换掉，但单账号场景没有可换对象，最终只显示通用文案「服务端拒绝了本次请求，请检查模型、套餐和请求设置」——按这三条查一条也查不到点上。现在该形状在通用分支之前被识别，提示为「账户额度不足，无法完成本次请求——请充值额度，或切换到其他账号」。判定复用账号轮换的同一组 pattern（新增 `isInsufficientCreditsText()` 与 `INSUFFICIENT_CREDITS`／`PREMIUM_CREDITS_EXHAUSTED` 代码集），两处不会漂移；失败码仍取 `httpErrorCode(status)`，重试预算与轮换行为不变。**验证**：`typecheck` 退出码 0，`npm test` 1156／1156（新增 3 条：实测正文、仅结构化代码、普通 400 不被吞）。
+
+## [0.16.3] - 2026-10-31
+
+### Changed
+
+- **同步 Command Code CLI `1.88.1` → `1.88.2`（纯请求头同步）。** npm `latest` 于 `2026-10-29T02:05Z` 前进到 `1.88.2`。CLI 的变更日志在 npm 包内 `CHANGELOG.md`（官网 `/changelog` 只覆盖 Desktop 应用），该版本只有一条 patch：「修复全新安装或更新后启动崩溃」。产物级比对：包内 80 个文件只有 `CHANGELOG.md`、`dist/cli.mjs`、`package.json`（仅版本号）与 VSIX 变化，依赖零变化；请求路径（193）、自定义请求头（13）、环境变量（48）集合相同，`/alpha/generate` 调用点在屏蔽混淆标识符后相似度 1.0，`promptCache`（5）／`reasoning_effort`（7）／`max_tokens`（12）／`cache_control`（1）计数相同，审计 `cliDiff`（模型、档位、订阅、ZDR 例外集）为空。服务端目录未动（`?view=client` 的 `catalogVersion` 仍 `7f405e24…`，默认 94、client 106 行），所有能力快照零变化，`COMMAND_CODE_CLI_VERSION` 只随请求头更新，运行时行为不变。
+- **同步定价页两条模型额度（`planAllowanceUsd`）。** 官网把 DeepSeek V4.1 Flash 与 GLM-5.3 Flash 的加成月度额度从 GOAT `$80`／Pro `$90` 上调到 GOAT `$100`／Pro `$110`（Go `$10` 不变），per-token 价格、Peak 时段与套餐可用性均未变；设置页「模型额度」随之显示新值。价格表由 `node scripts/sync-model-prices.mjs` 重新生成，全表只有这两行变化。GLM-5.3 Flash 仍标注 `while capacity lasts`；V4.1 Flash 的文案从「with no end date」改为「comes with bigger monthly credits」，官方未给结束时间，若之后回调按同一脚本再同步。**验证**：`typecheck` 退出码 0，`npm test` 1142／1142，`build` 两段 `Build complete`；未做真实账号登录与付费生成验证。
+
+### Fixed
+
+- **探活丢路径前缀、断连与保存失败提示不可诊断（#111、#110）。** 探活原先用 `new URL('/', apiBase)` 探 API base 根，会丢掉带路径前缀的反向代理前缀（如 `http://127.0.0.1:18797/bili/https://api.commandcode.ai`），状态行必然误报「本机无法连接」；现在改探真实端点 `${apiBase}/alpha/whoami` 并用与真实请求相同的字符串拼接保留前缀，未认证的 401/403 计为「可达」（探活刻意不带凭据），404/429/5xx 仍判异常，超时与传输失败继续分开。用量报告的每条端点失败在原文后追加中文原因与目标 `scheme://host:port`（映射 fetch `error.cause` 的 `ECONNREFUSED`／`ENOTFOUND`／连接超时等，原始错误码入括号），反代换端口、代理未启动与 API 故障因此可区分。设置保存的「配置提交未获确认」不再固定说「密钥未写入」：只有本次提交带密钥时才提密钥，否则只报配置未写入；宿主拒绝的原文（如 profile 写锁超时）以「宿主返回：…」附在提示后，折叠为一行并限长 240 字符。**验证**：`typecheck` 退出码 0，`npm test` 1153／1153，`build` 两段 `Build complete`；另在隔离 `DSH_HOME` + 真实宿主（`dsh 0.2.2-alpha.2`）+ 带路径前缀反代 + 无头 Chrome 下端到端复现：反代在线时状态行「本机 连通正常 · 781 ms」（旧探测目标反代根 `/` 返回 404），停反代后「本机无法连接」且失败详情带目标与 `ECONNREFUSED`，写锁超时保存提示带宿主原文；再用真实密钥复验：只读接口全部 200、状态行「连通正常」、真实生成 `POST /alpha/generate` 返回 200（会话费用 `≈$0.0015` 与上游扣减 `0.001471284` 一致）；最后复验浏览器登录链路：隔离宿主用凭据库中不存在的引用起步（界面「未配置」），点「网页登录」后按 Studio 回调契约提交真实密钥，回调 `200 {"success":true}`、校验请求经反代 `/alpha/whoami` 200、凭据落库且界面转为「已登录为 mars-sea」。Studio 页面本身的账号登录与 Cloudflare 挑战需真人完成，不在自动验证范围内。
+
 ## [0.16.2] - 2026-10-30
 
 ### Changed

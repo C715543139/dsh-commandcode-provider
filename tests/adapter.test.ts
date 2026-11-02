@@ -6174,6 +6174,11 @@ test('known thinking snapshot covers reasoning models without effort levels', ()
   assert.equal(KNOWN_THINKING_MODELS.has('inclusionai/ling-3.1-flash:free'), false)
   assert.deepEqual(KNOWN_EFFORTS['inclusionai/ling-3.1-flash'], ['low', 'medium', 'high'])
   assert.equal(KNOWN_EFFORTS['inclusionai/ling-3.1-flash:free'], undefined)
+  // 2026-11-02: the 1019 free promo keeps the three selectable levels — the
+  // `:free` suffix is a pricing row, not an effort downgrade — so it belongs in
+  // KNOWN_EFFORTS and not in the automatic-reasoning set.
+  assert.deepEqual(KNOWN_EFFORTS['inclusionai/ling-3.1-flash-1019:free'], ['low', 'medium', 'high'])
+  assert.equal(KNOWN_THINKING_MODELS.has('inclusionai/ling-3.1-flash-1019:free'), false)
   assert.ok(!KNOWN_THINKING_MODELS.has('meta/muse-spark-1.3'))
   assert.ok(!KNOWN_THINKING_MODELS.has('meta/muse-spark-1.3-contributor'))
   assert.ok(!KNOWN_EFFORTS['meituan/LongCat-2.0'])
@@ -6251,6 +6256,9 @@ test('known image models snapshot has stable anchor entries', () => {
   assert.ok(KNOWN_IMAGE_MODELS.has('meta/muse-wonder-1.0'))
   assert.ok(!KNOWN_IMAGE_MODELS.has('meituan/LongCat-2.0'))
   assert.ok(!KNOWN_IMAGE_MODELS.has('inclusionai/ling-3.0-flash-sante:free'))
+  // 2026-11-02: the 1019 free promo is text-only per `?view=client`
+  // `inputModalities: ["text"]`, so it carries no Image marker.
+  assert.ok(!KNOWN_IMAGE_MODELS.has('inclusionai/ling-3.1-flash-1019:free'))
   assert.ok(KNOWN_IMAGE_MODELS.has('xai/grok-4.6'))
   assert.ok(KNOWN_IMAGE_MODELS.has('deepseek/deepseek-v4.1-flash'))
   // Both 1.67.0/1.68.0 additions declare inputModalities ["text","image"] and carry
@@ -6388,6 +6396,11 @@ test('known plan snapshot tiers models by the official plan pages', () => {
   assert.equal(KNOWN_PLANS['inclusionai/ling-3.1-flash'], 'go')
   assert.equal(planLabel('inclusionai/ling-3.1-flash'), 'Go')
   assert.equal(KNOWN_PLANS['inclusionai/ling-3.1-flash:free'], undefined)
+  // 2026-11-02: the free 1019 promo row is the first Ling row served by the
+  // default catalog view since the 1.82.2 retirement; `minimumPlan:
+  // "individual-go"` puts it on Go.
+  assert.equal(KNOWN_PLANS['inclusionai/ling-3.1-flash-1019:free'], 'go')
+  assert.equal(planLabel('inclusionai/ling-3.1-flash-1019:free'), 'Go')
   // 2026-10-24: Kimi K3.1 Pro is Go on every source — `minimumPlan:
   // "individual-go"` in the live catalog and `"all": true` in the pricing page's
   // embedded availability, so it appears on the go/goat/pro plan pages alike.
@@ -6438,6 +6451,14 @@ test('known deals snapshot has anchors and expiry-aware labels', () => {
   assert.equal(KNOWN_DEALS['inclusionai/ling-3.1-flash:free'], undefined)
   assert.equal(KNOWN_DEALS['inclusionai/ling-3.1-flash'], undefined)
   assert.equal(isFreeModel('inclusionai/ling-3.1-flash'), false)
+  // 2026-11-02: the Ling 3.1 Flash 1019 free promo is the first dated Ling deal
+  // since the 1.82.2 retirement — it publishes `2026-11-03T16:00Z` as its end,
+  // so it is left to lapse via `expiresAt` rather than deleted; it is also
+  // served by the default catalog view, unlike the hidden retired row.
+  assert.equal(KNOWN_DEALS['inclusionai/ling-3.1-flash-1019:free']?.label, 'FREE')
+  assert.equal(KNOWN_DEALS['inclusionai/ling-3.1-flash-1019:free']?.free, true)
+  assert.equal(KNOWN_DEALS['inclusionai/ling-3.1-flash-1019:free']?.expiresAt, '2026-11-03T16:00:00Z')
+  assert.equal(isFreeModel('inclusionai/ling-3.1-flash-1019:free'), true)
   // command-code@1.79.0; the free Glyph Cluster preview carries the same
   // permanent-style terms as its Ling predecessors — 100% off "Free while the
   // preview lasts" with no published end date, so no `expiresAt` to lapse.
@@ -6672,7 +6693,7 @@ test('CLI version and API base constants are stable', () => {
   // record — what each upstream version added and what was re-verified unchanged — lives
   // in CHANGELOG.md (whose newest published entry may lag the pinned constant); this
   // assertion pins the constant only.
-  assert.equal(COMMAND_CODE_CLI_VERSION, '1.88.1')
+  assert.equal(COMMAND_CODE_CLI_VERSION, '1.88.2')
   assert.equal(DEFAULT_API_BASE, 'https://api.commandcode.ai')
 })
 
@@ -6980,6 +7001,68 @@ test('通用 HTTP 错误以中文说明和错误码展示，不回显上游正�
       assert.match(actual.message, /请求失败（HTTP 400）/)
       assert.match(actual.message, /错误码：validation_error/)
       assert.doesNotMatch(actual.message, /private prompt marker|upstream reflected/)
+      return true
+    },
+  )
+})
+
+test('账户额度不足时给出可行动文案，不再指向模型与请求设置', async () => {
+  // 2026-10-31 实测：余额为 0 的账号在 /provider/v1/chat/completions 返回 400，
+  // 正文点名 insufficient credits；当时界面只显示通用提示「请检查模型、套餐和
+  // 请求设置」，按那三条查一条也查不到点上。单账号场景没有可轮换的对象，
+  // 这个文案就是用户唯一的线索。
+  const { fetchImpl } = fetchByKey({
+    'key-1': { status: 400, body: JSON.stringify({ error: {
+      message: 'You have insufficient credits to make this request. Please purchase more credits to continue using the service.',
+      type: 'invalid_request_error',
+      code: 'BAD_REQUEST',
+    } }) },
+  })
+  const adapter = makeAdapter({ fetchImpl, resolveApiKey: async () => 'key-1' })
+  await assert.rejects(
+    collect(adapter.stream({ provider: 'commandcode', model: 'm', messages: [userMessage('hi')] })),
+    (error: unknown) => {
+      const actual = error as { code?: string; message: string; failure?: { status?: number } }
+      assert.equal(actual.code, 'PROVIDER_HTTP_ERROR')
+      assert.equal(actual.failure?.status, 400)
+      assert.match(actual.message, /账户额度不足/)
+      assert.match(actual.message, /充值额度，或切换到其他账号/)
+      assert.match(actual.message, /insufficient credits for the request/)
+      // 通用文案会把人引向错误方向，必须让位；上游英文正文仍不回显。
+      assert.doesNotMatch(actual.message, /请检查模型、套餐和请求设置/)
+      assert.doesNotMatch(actual.message, /purchase more credits/)
+      return true
+    },
+  )
+})
+
+test('额度不足只凭结构化代码也识别，无需正文措辞', async () => {
+  // 与账号轮换同一组证据：官方 CLI 的 isInsufficientCreditsRequestError 也读代码。
+  for (const code of ['INSUFFICIENT_CREDITS', 'PREMIUM_CREDITS_EXHAUSTED'] as const) {
+    const { fetchImpl } = fetchByKey({ 'key-1': { status: 400, body: JSON.stringify({ error: { code } }) } })
+    const adapter = makeAdapter({ fetchImpl, resolveApiKey: async () => 'key-1' })
+    await assert.rejects(
+      collect(adapter.stream({ provider: 'commandcode', model: 'm', messages: [userMessage('hi')] })),
+      (error: unknown) => {
+        const actual = error as { message: string }
+        assert.match(actual.message, /账户额度不足/, code)
+        return true
+      },
+    )
+  }
+})
+
+test('普通 400 不被额度分支吞掉，仍走通用文案', async () => {
+  const { fetchImpl } = fetchByKey({
+    'key-1': { status: 400, body: JSON.stringify({ error: { code: 'validation_error', message: 'bad field' } }) },
+  })
+  const adapter = makeAdapter({ fetchImpl, resolveApiKey: async () => 'key-1' })
+  await assert.rejects(
+    collect(adapter.stream({ provider: 'commandcode', model: 'm', messages: [userMessage('hi')] })),
+    (error: unknown) => {
+      const actual = error as { message: string }
+      assert.match(actual.message, /请检查模型、套餐和请求设置/)
+      assert.doesNotMatch(actual.message, /账户额度不足/)
       return true
     },
   )
@@ -7756,7 +7839,23 @@ test('getUsage() classifies an all-transport-failure run as network', async () =
   // an unparseable API base and a per-request timeout, so the card renders
   // these rather than only the generic "check your connection" hint.
   assert.equal(report.failures.length, 4)
-  assert.match(report.failures[0] ?? '', /^\/alpha\/whoami: fetch failed/)
+  assert.match(report.failures[0] ?? '', /^\/alpha\/whoami: fetch failed；目标 https:\/\/api\.commandcode\.ai$/)
+})
+
+test('getUsage() names the transport cause when nothing answers the port', async () => {
+  const adapter = makeAdapter({
+    fetchImpl: (async () => {
+      const cause = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:18797'), { code: 'ECONNREFUSED' })
+      throw new TypeError('fetch failed', { cause })
+    }) as unknown as typeof fetch,
+  })
+  const report = await adapter.getUsage('user_test_key')
+  assert.equal(report.blocked, 'network')
+  assert.equal(report.failures.length, 4)
+  for (const failure of report.failures) {
+    // 反代换端口/未启动与 API 故障的区别就在这一句里：原因 + 目标主机:端口。
+    assert.match(failure, /；连接被拒绝（ECONNREFUSED）；目标 https:\/\/api\.commandcode\.ai$/)
+  }
 })
 
 test('getUsage() asks for identity encoding when a host would otherwise pass raw Brotli', async () => {
@@ -8507,6 +8606,9 @@ test('every new-arrival model carries an output ceiling or is left to runtime le
   // no longer generated for it at all.
   assert.equal(MODEL_OUTPUT_TOKEN_LIMITS.get('inclusionai/ling-3.1-flash'), undefined)
   assert.equal(MODEL_OUTPUT_TOKEN_LIMITS.get('inclusionai/ling-3.1-flash:free'), undefined)
+  // 2026-11-02: the 1019 free row is a chat/completions model like its sibling,
+  // so it stays out of the Messages ceiling table too.
+  assert.equal(MODEL_OUTPUT_TOKEN_LIMITS.get('inclusionai/ling-3.1-flash-1019:free'), undefined)
   // A ceiling is a CEILING, not a window: both are far below their own context,
   // which is the whole point of the table — deriving `max_tokens` from
   // `context_length` is exactly what produced #71.
