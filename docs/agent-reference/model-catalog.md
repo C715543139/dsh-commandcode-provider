@@ -138,6 +138,60 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   2026-10-22-lapsed free twin still carried in the page data, which is what makes the
   mapping ambiguous.
 
+  **Follow-up check (2026-11-04, CLI stays 1.88.2):** npm `latest` is still `1.88.2` and the
+  artifact is unchanged, so `cliDiff` stays empty. The server catalog moved `catalogVersion`
+  `f3a51355…` → `449ff6a3…`: the default view went 95 → 96 and `?view=client` 107 → 109 with
+  two net adds. `stealth/crouton-alpha` (Crouton Alpha) is a new free stealth preview —
+  1,048,576 context, 943,718 output ceiling, text+image input, efforts
+  `low`/`medium`/`high`/`xhigh`/`max`, Go tier, `/chat/completions` endpoint, 100% off
+  "while the stealth preview lasts" with 1,000 requests a day, and **not** ZDR-covered (the
+  pricing tip says so outright and `?view=client` serves `zdr:false`); it is the first stealth
+  preview with image input. The free 1019 promo lapsed at its published `2026-11-03T16:00Z`,
+  the row went `hidden` in `?view=client`, and its paid graduation
+  `inclusionai/ling-3.1-flash-1019` took the slot — $0.30/$0.90, cache read $0.06, the same
+  1,000,000 context and 262,144 ceiling, still text-only / three efforts / Go, with the page's
+  boosted allowance go `$6` / GOAT `$100` / Pro `$110`. Snapshots: plans 95 → 96, efforts
+  68 → 69 (the retired `:free` id re-keyed to its paid graduation, plus Crouton), image
+  73 → 74, ZDR 18 → 19, vendored price rows 94 → 95 (only the Ling 1019 row is new),
+  output-limit rows 79 → 83 (Ling 1019, Crouton Alpha, plus `gpt-6.1-terra` and
+  `Kimi-K3.1-Pro`, which had been carried in `KNOWN_PLANS` without their ceiling rows);
+  thinking 16, subscriptions 9 and peak rows 5 stay put. The two known pricing aliases still
+  surface as `incomplete` errors, and both new rows report `absent from CLI registry` —
+  correctly, because the artifact predates them.
+
+  **Follow-up check (2026-11-05, CLI 1.88.2 → 1.88.3):** npm `latest` reached `1.88.3`
+  (11-04T21:19Z, Beijing 11-05 05:19). The npm package's own `CHANGELOG.md` carries exactly one
+  entry for it — "chore: bump deps to latest versions" — and `package.json` changes only the
+  version plus `glob ^13.0.5` → `^14.0.3`; the website changelog's newest CLI entry is still
+  `1.88.0`, because that page covers the Desktop app while CLI releases log in the npm tarball.
+  The 80 tarball file names match 1.88.2; contents differ in `CHANGELOG.md`, `dist/cli.mjs`,
+  `package.json`, the VSIX and two bundled knowledge docs (`reference/models.md`,
+  `reference/product-help.md`). The artifact tables move from the catalog build pipeline rather
+  than from this release: +3 registry rows (`inclusionai/ling-3.1-flash-1019`, its retired
+  `:free` twin and `stealth/crouton-alpha`), a ZDR exception set of 18 → 19, per-model free-cap
+  notices replacing the single `100 requests a day` template (1,000 a day for Glyph Cluster,
+  Beam 1.0, Laguna S 2.1 and Crouton Alpha; 100 for the hidden Ling 1019 `:free` row — the
+  plugin displays none of them), and an embedded `catalogVersion` `7f405e24…` → `449ff6a3…`.
+  Those three rows were already synced from the catalog in v0.17.0, so no capability snapshot
+  changes; the artifact exception set and the catalog's `zdr:false` rows now hold the same 19
+  ids for the first time since 1.86.1 (18 → 19, Crouton only). Mechanism and call-site counts
+  are identical — `promptCache` (5) / `reasoning_effort` (7) / `max_tokens` (12) /
+  `cache_control` (1), the `/alpha/generate` call-site count, the effort source
+  (`getSupportedEfforts` over registry rows), `buildModelGroups`, `getPlanInfo` and
+  `modelSupportsZdr`. The custom-header and environment-variable sets lose exactly one pair, the
+  CLI-internal `x-cmd-provider-deepseek-internal` / `CMD_PROVIDER_DEEPSEEK_INTERNAL` (5 literal
+  references in 1.88.2, 0 in 1.88.3), which this plugin has never sent; the endpoint-path
+  strings and every `commandcode.ai` URL are unchanged. The live catalog then moved again:
+  `?view=client` `catalogVersion` `449ff6a3…` → `44c46d98…`, the default view 96 → 95 and the
+  client view still 109, with `poolside/laguna-s-2.1-free` flipped to `hidden` and withdrawn
+  from the models/pricing/plan pages and the deal list; its snapshot rows are deliberately kept
+  pending observation, so the audit's only `candidateDiffs` are that model (`KNOWN_PLANS`,
+  `KNOWN_THINKING_MODELS`). Everything else holds: `node scripts/sync-model-prices.mjs --check`
+  exits 0 ("model prices are up to date (95 rows)"); efforts 69, plans 96, image 74, ZDR 19,
+  deals 5, subscriptions 9 and peak rows 5 stay put. This round only moves
+  `COMMAND_CODE_CLI_VERSION` to `1.88.3` and updates comments/tests; with the two verified
+  pricing aliases the audit is `review-required` with 0 errors.
+
   - `KNOWN_EFFORTS` — model → selectable reasoning-effort levels. Authoritative source is the live
     `?view=client` catalog's `reasoningEfforts` (since command-code@1.82.4 the CLI no longer keeps this map
     bundled — `getSupportedEfforts()` resolves it through the catalog, whose embedded bootstrap snapshot

@@ -17,7 +17,7 @@ import {
   supportsZeroDataRetention,
 } from '../src/capabilities.ts'
 
-test('the ZDR exception list is the live catalog zdr verdict (command-code@1.88.2)', () => {
+test('the ZDR exception list is the live catalog zdr verdict (command-code@1.88.3)', () => {
   // command-code@1.82.4 moved the authority for this verdict out of the CLI
   // artifact: `knownModelSupportsZdr` no longer negates a bundled Set, it reads
   // `resolveKnownCatalogModel({model,catalog})?.zdr ?? false`. So this list is
@@ -63,6 +63,12 @@ test('the ZDR exception list is the live catalog zdr verdict (command-code@1.88.
   // V2.6 Flash/Pro, GLM-5.2 Fast) plus `stealth/cat-jam:free`, which no source
   // serves any more — removed by explicit decision (decision record, chapter 7
   // item 13), not by inferring coverage from its absence.
+  //
+  // 2026-11-04 (catalog-only sync) adds `stealth/crouton-alpha` from the pricing
+  // page and `?view=client` alone, because the 1.88.2 artifact predates the row.
+  // The 1.88.3 artifact's exclusion set now names it too, so the artifact and
+  // the catalog carry the same 19 ids — the first exact match since 1.86.1
+  // (18 -> 19, Crouton being the only addition).
   assert.deepEqual([...KNOWN_NON_ZDR_MODELS].sort(), [
     'MiniMaxAI/MiniMax-M3',
     'Qwen/Qwen3.8-Max-0902',
@@ -76,6 +82,7 @@ test('the ZDR exception list is the live catalog zdr verdict (command-code@1.88.
     'poolside/laguna-s-2.1-free',
     'reflection/beam:free',
     'sakana/fugu-ultra',
+    'stealth/crouton-alpha',
     'stealth/glyph-cluster:free',
     'stepfun/Step-3.7-Flash',
     'stepfun/Step-5-Preview',

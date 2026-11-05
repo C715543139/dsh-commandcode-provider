@@ -4,7 +4,7 @@
  * subscription-plan labels, deals, and hourly (peak/off-peak) pricing.
  *
  * Everything here is synced from official sources — the command-code CLI
- * bundle's model table (`dist/cli.mjs`, re-verified at command-code@1.88.2), the
+ * bundle's model table (`dist/cli.mjs`, re-verified at command-code@1.88.3), the
  * live model catalog (`GET /provider/v1/models?view=client`, the authority for
  * capability fields since 1.82.4), and the official plan/pricing/model docs; see
  * the dsh-commandcode-upstream skill for the extraction procedures. The
@@ -29,7 +29,11 @@
  * changes. The 2026-10-31 check moves it to 1.88.2 — the npm package's own
  * CHANGELOG names its sole change as a launch-crash fix after a fresh install
  * or update — and again leaves every table here identical; that round's only
- * data change is two per-model allowances in ./model-prices.ts. Keeping the
+ * data change is two per-model allowances in ./model-prices.ts. The 2026-11-05
+ * check moves it to 1.88.3, whose npm CHANGELOG only bumps dependencies while
+ * its artifact tables catch up with the catalog rows already synced here (Ling
+ * 1019 and Crouton Alpha) and its ZDR exception set finally equals the
+ * catalog's verdict, 19 == 19; no table below changes. Keeping the
  * snapshot in its own module
  * confines those frequent sync diffs here: src/adapter.ts holds only the stable
  * wire/runtime logic. The read helpers live here too, for the same reason.
@@ -43,7 +47,7 @@ import { PLAN_LABELS, PLAN_ORDER } from './plan-tiers.ts'
 export { PLAN_LABELS, PLAN_ORDER } from './plan-tiers.ts'
 
 export const KNOWN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  // Re-verified against the authoritative command-code@1.88.2 model table. From
+  // Re-verified against the authoritative command-code@1.88.3 model table. From
   // 1.82.4 the CLI no longer keeps this map bundled: `getSupportedEfforts()`
   // resolves it through the model catalog (`reasoningEfforts`), served live at
   // `GET /provider/v1/models?view=client` and falling back to an embedded
@@ -205,7 +209,7 @@ export const KNOWN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // 2026-10-27 (catalog-only sync): `?view=client` serves
   // `reasoningEfforts:["low","medium","high","xhigh","max"]` and the pricing
   // page carries `caps.reasoning: true`; the 1.88.0 artifact does not name the
-  // row (1.88.2 does, with the same levels). Same five-level set as its
+  // row (1.88.3 does, with the same levels). Same five-level set as its
   // `gpt-6.1-sol` predecessor; do not inherit future levels without
   // re-checking the catalog.
   'gpt-6.1-terra': ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -216,14 +220,18 @@ export const KNOWN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // this file any more. Three selectable levels, text-only input, Go tier —
   // like its `mistral-large-4` neighbour, and unlike the free stealth previews.
   'inclusionai/ling-3.1-flash': ['low', 'medium', 'high'],
-  // 2026-11-02 (catalog-only sync; the 1.88.2 artifact's registry does not name
-  // the row yet): `inclusionai/ling-3.1-flash-1019:free`, the free 1M-context
-  // twin of `ling-3.1-flash`. The `:free` suffix does NOT flatten the levels —
-  // this promo is served with `reasoningEfforts:["low","medium","high"]`, unlike
-  // the retired `ling-3.1-flash:free` — and its capability fields come from
-  // `?view=client` as usual. Text-only input (see `KNOWN_IMAGE_MODELS`) and Go
-  // tier (see `KNOWN_PLANS`).
-  'inclusionai/ling-3.1-flash-1019:free': ['low', 'medium', 'high'],
+  // 2026-11-04 (catalog-first sync, confirmed by the 1.88.3 artifact, whose
+  // registry now names both the paid row and its retired `:free` twin): the
+  // free 1019 promo lapsed at `2026-11-03T16:00Z`, the catalog flipped that row
+  // `hidden`, and the paid `inclusionai/ling-3.1-flash-1019` took over the same
+  // three selectable levels — the 1019 generation is the 1M-context sibling of
+  // `ling-3.1-flash`. Text-only input (see `KNOWN_IMAGE_MODELS`) and Go tier
+  // (see `KNOWN_PLANS`).
+  'inclusionai/ling-3.1-flash-1019': ['low', 'medium', 'high'],
+  // 2026-11-04 (catalog-only sync): `stealth/crouton-alpha`, the newest stealth
+  // preview — and the widest effort set of the stealth rows at five levels
+  // (Glyph Cluster serves four; the retired Space Bunny Alpha stopped at `max`).
+  'stealth/crouton-alpha': ['low', 'medium', 'high', 'xhigh', 'max'],
   // command-code@1.75.0 ("Add Mistral Large 4") — the only model the 1.74.3 ->
   // 1.77.0 train added. A three-level set; Vision per the official registry and
   // the CLI's inputModalities:["text","image"] (see `KNOWN_IMAGE_MODELS`), and
@@ -369,6 +377,11 @@ export const KNOWN_IMAGE_MODELS: ReadonlySet<string> = new Set([
   // with the other snapshots (promo lapsed, row hidden).
   'ornith/ornith-1.5-122b',
   'sakana/fugu-ultra',
+  // 2026-11-04 (catalog-only sync): inputModalities:["text","image"] in the live
+  // `?view=client` catalog, and both the pricing page (`caps.vision: true`) and
+  // the models docs page mark the row Vision — the first stealth preview with
+  // image input (Glyph Cluster and its retired siblings were text-only).
+  'stealth/crouton-alpha',
   // command-code@1.65.0; Vision per the official registry and inputModalities.
   'stepfun/Step-3.7-Flash',
   // command-code@1.60.0; Vision per the official registry and inputModalities.
@@ -522,6 +535,13 @@ export const KNOWN_NON_ZDR_MODELS: ReadonlySet<string> = new Set([
   // 100 requests a day. Not routed under ZDR." The CLI's own exclusion set
   // carries the same membership.
   'stealth/glyph-cluster:free',
+  // 2026-11-04 (catalog-only sync, resolved by the 1.88.3 artifact).
+  // `?view=client` served `zdr:false` for the Crouton Alpha stealth preview
+  // while the 1.88.2 artifact named it nowhere (the row was newer than the
+  // artifact); the 1.88.3 exclusion set lists it now, and the pricing page
+  // states it in prose too — "Not routed under ZDR" — so the artifact and the
+  // catalog agree again (19 == 19, the first exact match since 1.86.1).
+  'stealth/crouton-alpha',
   'stepfun/Step-3.7-Flash',
   'stepfun/Step-5-Preview',
   // 2026-10-21 (command-code@1.86.1 sync). New to the exclusion set: the catalog
@@ -654,8 +674,8 @@ export function requiresMessagesEndpoint(modelId: string): boolean {
  * **Generated — do not hand-edit.** `scripts/sync-output-limits.mjs` rewrites
  * this literal from models.dev; run it after a catalog sync, and use its
  * `--check` in CI. Command Code resells these models through their VENDOR's own
- * API, so the vendor's published ceiling is the value recorded: 76 of the 89
- * catalog ids as of 2026-10-15. Each row carries a comment naming the entry it
+ * API, so the vendor's published ceiling is the value recorded: 83 of the 96
+ * catalog ids as of 2026-11-04. Each row carries a comment naming the entry it
  * came from.
  *
  * No row needs a hand-recorded pin as of 2026-10-16: the one that did
@@ -747,6 +767,10 @@ export const MODEL_OUTPUT_TOKEN_LIMITS: ReadonlyMap<string, number> = new Map([
   ['gpt-6-sol', 128000],
   // openai
   ['gpt-6.1-sol', 128000],
+  // openai
+  ['gpt-6.1-terra', 128000],
+  // 1 provider(s), unanimous
+  ['inclusionai/ling-3.1-flash-1019', 262144],
   // 1 provider(s), unanimous
   ['meituan/LongCat-2.0', 131072],
   // meta
@@ -779,6 +803,8 @@ export const MODEL_OUTPUT_TOKEN_LIMITS: ReadonlyMap<string, number> = new Map([
   ['moonshotai/Kimi-K2.7-Code-Highspeed', 262144],
   // moonshotai
   ['moonshotai/Kimi-K3', 1048576],
+  // moonshotai
+  ['moonshotai/Kimi-K3.1-Pro', 1048576],
   // nvidia
   ['nvidia/nemotron-3-ultra-550b-a55b', 65536],
   // poolside
@@ -803,6 +829,8 @@ export const MODEL_OUTPUT_TOKEN_LIMITS: ReadonlyMap<string, number> = new Map([
   ['Qwen/Qwen3.8-Omni-Flash', 131072],
   // sakana
   ['sakana/fugu-ultra', 1000000],
+  // 1 provider(s), unanimous
+  ['stealth/crouton-alpha', 943718],
   // stepfun
   ['stepfun/Step-3.5-Flash', 256000],
   // stepfun
@@ -863,8 +891,8 @@ export const DEFAULT_MESSAGES_MAX_TOKENS = 64_000
  * `/docs/plans/max` and `/docs/resources/pricing-limits`). Each plan's model
  * list is a superset of the one below it: Go ⊂ GOAT ⊂ Pro ⊂ Provider/Max.
  * Models absent from every plan list (Claude Opus/Fable, Fugu Ultra) are
- * Provider-tier. Re-verified at command-code@1.88.2 (2026-10-31) against the
- * live `?view=client` catalog: 106 ids, still a strict superset chain. Mistral
+ * Provider-tier. Re-verified at command-code@1.88.3 (2026-11-05) against the
+ * live `?view=client` catalog: 109 ids, still a strict superset chain. Mistral
  * Large 4 (1.75.0) was the only addition at the 1.77.0 check; the 1.78.0/1.79.0 pair
  * added Claude Haiku 5.5 at Pro and the free Glyph Cluster preview at Go.
  * 1.79.2 lowers Haiku 5.5's minimum plan to GOAT; 1.80.0 adds Muse Wonder at
@@ -875,7 +903,11 @@ export const DEFAULT_MESSAGES_MAX_TOKENS = 64_000
  * tier is unchanged. The 1.86.1 sync (2026-10-21) adds only the Ornith 1.5 122B
  * launch pair at Go; the 1.87.1 check (2026-10-22) adds no model and moves no
  * tier, the 2026-10-24 check adds only Kimi K3.1 Pro at Go, and the 2026-10-27
- * check adds only GPT-6.1 Terra at Pro.
+ * check adds only GPT-6.1 Terra at Pro. The 2026-11-04 catalog-only sync adds
+ * Ling 3.1 Flash 1019 and the free Crouton Alpha preview at Go; the 2026-11-05
+ * check finds `?view=client` flipping `poolside/laguna-s-2.1-free` to `hidden`
+ * and withdrawing it from the models/pricing/plan pages, while this snapshot
+ * keeps that row pending observation.
  * The only removals since 1.49.0 are the two retired stealth previews (Pixel
  * Canary at 1.73.1, Space Bunny Alpha at 1.74.3), Ling 3.0 Flash Sante
  * (2026-10-16) and the retired Cat Jam preview (2026-10-20). Per-entry tags
@@ -935,10 +967,16 @@ export const KNOWN_PLANS: Readonly<Record<string, string>> = {
   // grants every tier (individual-go through teams-pro) — the "all":true shape
   // shared with its `ling-3.0-flash-sante:free` predecessor.
   'inclusionai/ling-3.1-flash': 'go',
-  // 2026-11-02; the free 1019 promo row is Go on every source — `minimumPlan:
-  // "individual-go"` in `?view=client` and the pricing page's embedded
-  // availability grants every tier (the same "all":true shape as its sibling).
-  'inclusionai/ling-3.1-flash-1019:free': 'go',
+  // 2026-11-04; the free 1019 promo lapsed and the paid row graduated in
+  // place — Go on every source (`minimumPlan: "individual-go"` in
+  // `?view=client`, and the pricing page's embedded availability grants every
+  // tier, the same "all":true shape as its `ling-3.1-flash` sibling).
+  'inclusionai/ling-3.1-flash-1019': 'go',
+  // 2026-11-04 (catalog-only sync): the Crouton Alpha stealth preview is Go on
+  // every source — `minimumPlan: "individual-go"` and `"all": true` in the
+  // pricing page's embedded availability, so it appears on the go / goat / pro
+  // plan pages alike.
+  'stealth/crouton-alpha': 'go',
   // command-code@1.44.0; on every plan including Go, like its 1.2 Contributor
   // sibling.
   'meta/muse-spark-1.2-contributor': 'go',
@@ -1264,18 +1302,23 @@ export interface KnownDeal {
 
 export const KNOWN_DEALS: Readonly<Record<string, KnownDeal>> = {
   'MiniMaxAI/MiniMax-M3': { label: '50% off' },
-  // 2026-11-02 (catalog-only sync): `inclusionai/ling-3.1-flash-1019:free` is
-  // 100% off through `2026-11-03T16:00Z` ("until 16:00 UTC on November 3") with
-  // a 100-requests-a-day cap. Unlike the retired `ling-3.1-flash:free`, the row
-  // is served by the default catalog view, the pricing page and every plan page,
-  // so it gets a badge — and because this promo publishes its end date, it is
-  // left to lapse through `expiresAt` instead of being deleted like the undated
-  // previews.
-  'inclusionai/ling-3.1-flash-1019:free': {
-    label: 'FREE',
-    free: true,
-    expiresAt: '2026-11-03T16:00:00Z',
-  },
+  // 2026-11-04 (catalog-only sync): `stealth/crouton-alpha` is the fourth live
+  // free preview in this map and the first one with image input. Its terms are
+  // the undated kind — 100% off "while the stealth preview lasts", 1000
+  // requests a day, no published end instant — so it carries no `expiresAt` and
+  // is deleted (not lapsed) when the preview retires, like its Glyph Cluster
+  // sibling. The pricing page publishes it at a literal zero, which
+  // `modelPriceTable()` serves from this deal, so it gets no row in the
+  // vendored price table either.
+  'stealth/crouton-alpha': { label: 'FREE', free: true },
+  // `inclusionai/ling-3.1-flash-1019:free` (the dated 2026-11-02 promo, 100% off
+  // through `2026-11-03T16:00Z`) left this map on 2026-11-04: the promo lapsed,
+  // the row went `hidden` in `?view=client`, and both the default catalog view
+  // and the pricing page dropped it — the same retirement path
+  // `minimax/minimax-m3.1-flash:free` took. The paid
+  // `inclusionai/ling-3.1-flash-1019` graduation is priced normally and carries
+  // no deal; the page instead publishes its boosted GOAT/Pro allowance, which
+  // the vendored price table carries as `planAllowance`.
   // `minimax/minimax-m3.1-flash:free` (the 2026-10-20 dated launch promo, 100%
   // off through `2026-10-22T10:45Z`) left this map on 2026-10-23: the promo
   // lapsed, the row went `hidden` in `?view=client`, and it is gone from the
@@ -1451,6 +1494,70 @@ export function dealLabel(modelId: string, now: number = Date.now()): string | u
   if (deal === undefined) return undefined
   if (deal.expiresAt !== undefined && now >= Date.parse(deal.expiresAt)) return undefined
   return deal.label
+}
+
+/**
+ * A model selector badge text: a literal, or translations DSH resolves against
+ * the active UI language. DSH requires `en`; the other key is the lowercase
+ * locale id (`zh` here, the only shipped language besides English).
+ */
+export type ProviderModelBadgeText = string | { readonly en: string; readonly zh: string }
+
+/** DSH's badge emphasis. `success` tints the Tag green (benefit or enabled). */
+export type ProviderModelBadgeTone = 'neutral' | 'info' | 'success' | 'warning'
+
+/**
+ * One selector badge, structurally DSH's `LlmModelBadge` (`@deepseek-ai/dsh-llm`
+ * 0.2.1-rc.4+; the installed dev types predate the field, so this module owns
+ * the shape instead of importing it).
+ */
+export interface ProviderModelBadge {
+  /** Short label shown beside the model name. */
+  readonly text: ProviderModelBadgeText
+  /** Emphasis; promo badges use `success`. */
+  readonly tone: ProviderModelBadgeTone
+}
+
+/**
+ * Chinese/English badge copy for the deal labels the pricing page publishes.
+ *
+ * Keyed by the DEAL LABEL, because that is what the sync snapshot carries. An
+ * unmapped label falls back to its English literal (`dealBadgeText`), so a new
+ * upstream label still renders — add a row here when one appears so Chinese
+ * users get a translated badge too.
+ */
+const DEAL_BADGE_TEXT: Readonly<Record<string, ProviderModelBadgeText>> = {
+  FREE: { en: 'FREE', zh: '免费' },
+  '50% off': { en: '50% off', zh: '5折' },
+}
+
+/**
+ * Short badge copy for one deal label, resolved through {@link DEAL_BADGE_TEXT}.
+ * Exported for the tests that pin the unmapped-label fallback.
+ */
+export function dealBadgeText(label: string): ProviderModelBadgeText {
+  return DEAL_BADGE_TEXT[label] ?? label
+}
+
+/**
+ * The selector badge for one model: its ACTIVE deal as a short Tag, or
+ * undefined when the model has no deal or the deal has lapsed.
+ *
+ * DSH's model selector renders `LlmModelInfo.badge` as a Tag — BEFORE the name
+ * in the composer trigger, AFTER it in the menu rows — through the host locale,
+ * so the badge follows the UI language. Expiry uses the same clock as
+ * {@link dealLabel}: the same instant that hides the description marker also
+ * drops the badge. Plan tier, peak state, Image support and context length stay
+ * in the model `description` (they are sentences, not labels); this is the
+ * deal/promo marker only.
+ *
+ * The tone is `success` for every promo: a free row and a discounted row are
+ * both benefits, and the text already distinguishes them.
+ */
+export function modelBadge(modelId: string, now: number = Date.now()): ProviderModelBadge | undefined {
+  const label = dealLabel(modelId, now)
+  if (label === undefined) return undefined
+  return { text: dealBadgeText(label), tone: 'success' }
 }
 
 /**
