@@ -35,7 +35,7 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   snapshot in `src/capabilities.ts` is informational and may lag provider coverage or capacity.
   `tests/adapter.test.ts` checks the chat transports, off by default, unsupported models retaining the header,
   and 422 diagnosis.
-- **Wire protocol** (reverse-engineered, command-code@1.28.4; re-verified through 1.79.1):
+- **Wire protocol** (reverse-engineered, command-code@1.28.4; re-verified through 1.88.5):
   - `POST {apiBase}/alpha/generate` — CLI transport body `{ config, memory, taste, skills, permissionMode,
     params: { model, messages, tools, system, max_tokens, temperature, stream, reasoning_effort? },
     threadId }`. The real CLI's request also carries `mode` (server-validated against a fixed enum —
@@ -65,7 +65,14 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   - `POST {apiBase}/provider/v1/chat/completions` — documented OpenAI-format transport with a flat body `{
     model, messages, tools?, max_tokens, temperature, stream, reasoning_effort? }`. Used for every account
     with Provider API access whose model the catalog does not route to `/messages`; historical reasoning is
-    replayed as `reasoning_content`.
+    replayed as `reasoning_content`. `temperature` starts from the caller's value and defaults to 0.3, but a
+    model whose own upstream pins it to 1 gets NO field: `moonshotai/Kimi-K3.1-Pro` refuses 0.3 with HTTP 400
+    `temperature must be 1 for kimi-k3.1-pro` (measured 2026-11-06; 1 and an absent field both answer 200),
+    and the refusal names nothing the error mapping recognises, so it surfaced as the generic "服务端拒绝了
+    本次请求" for every turn. The same omission is applied to the CLI transport — the constraint belongs to the
+    model, not the wire — and the pin lives in `PINNED_TEMPERATURE_MODELS` (`./capabilities.ts`). Omitting
+    rather than writing 1 matches the Messages transport: the endpoint owns the number, so a caller's value is
+    dropped instead of being silently replaced.
   - `POST {apiBase}/provider/v1/messages` — **Anthropic Messages transport, the only Provider API route the
     Claude family answers** (see the routing bullet below). Every clause below was measured live on
     2026-09-29 against `claude-sonnet-5-5`; the shapes differ from `dsh-llm-deepseek`'s Messages API in two
@@ -289,7 +296,8 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   - Web search: `POST {apiBase}/alpha/web-search` — body `{ query, numResults, allowedDomains?,
     blockedDomains? }` → `{ results: [{ title, url, snippet }] }`; same `Authorization: Bearer <key>` +
     `x-command-code-version` as generate.
-  - Defaults: `apiBase = https://api.commandcode.ai`, `COMMAND_CODE_CLI_VERSION = '1.68.0'`.
+  - Defaults: `apiBase = https://api.commandcode.ai`, and `COMMAND_CODE_CLI_VERSION` — the pinned
+    official CLI version sent as `x-command-code-version` (see `src/adapter.ts`).
   - **Request image budget (issue #37)**: the gateway caps a whole request body at a measured ~50.17 MB
     (undocumented — their Error Codes page has no 413). All three transports inline every historical image as
     base64 and the harness never reclaims history, so a long session (a vision self-check loop reading back
@@ -478,4 +486,8 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   peers alone cannot expose this contract drift.
 - **Adapter is cordis-free** by design: `src/adapter.ts` takes a per-request `options()` thunk +
   `resolveApiKey()` from the plugin entry, so settings changes reach the next request without
-  re-registration. It also accepts an injectable `fetchImpl` for tests.
+  re-registration. It also accepts an injectable `fetchImpl` for tests. Without one it late-binds:
+  every request calls the CURRENT `globalThis.fetch`, never a function captured at construction, so a
+  host/plugin interceptor installed after `apply()` (billion-context prompt compression) still sees
+  the request. Capturing the constructor-time function made that interceptor invisible and let
+  uncompressed long histories overflow the model window (issue #119).

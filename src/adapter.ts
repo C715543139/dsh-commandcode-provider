@@ -78,6 +78,7 @@ import {
   compareByPlan,
   modelBadge,
   modelVisibleForAnyAccount,
+  pinsTemperature,
   requiresMessagesEndpoint,
   subscriptionPlanInfo,
   type CommandCodeBillingAccess,
@@ -90,21 +91,23 @@ export { DEFAULT_MAX_OUTPUT_TOKENS, MODEL_CATALOG_TTL_MS } from './gateway-facts
 // Request / connection defaults (protocol constants). The model/plan/deal
 // capability snapshot lives in ./capabilities.ts — the sync-only surface.
 // ---------------------------------------------------------------------------
-// Rides every request as `x-command-code-version`. The 1.88.3 bump is a pure
-// header sync as well: the npm package's own CHANGELOG.md — the website
-// https://commandcode.ai/changelog covers only the Desktop app — names its
-// sole entry as "chore: bump deps to latest versions", and package.json moves
-// only the version plus `glob ^13.0.5 -> ^14.0.3`. The artifact tables still
-// moved because they are built from the catalog pipeline, not from this
-// release: +3 registry rows (Ling 3.1 Flash 1019, its retired `:free` twin and
-// Crouton Alpha), a ZDR exception set of 18 -> 19, and an embedded
-// `catalogVersion` `7f405e24…` -> `449ff6a3…`. The contract this plugin
-// consumes is unchanged: the effort source, `buildModelGroups` / `getPlanInfo`,
-// the `/alpha/generate` call site and the `promptCache` / `reasoning_effort` /
-// `max_tokens` / `cache_control` counts all match, and the only removed custom
-// header is the CLI-internal `x-cmd-provider-deepseek-internal` (environment
-// variable `CMD_PROVIDER_DEEPSEEK_INTERNAL`), which this plugin has never sent.
-export const COMMAND_CODE_CLI_VERSION = '1.88.3'
+// Rides every request as `x-command-code-version`. The 1.88.5 bump is a pure
+// header sync: the npm package's own CHANGELOG.md — the website
+// https://commandcode.ai/changelog covers only the Desktop app — has one entry,
+// "fix: cmd login and /login start a new login if API key is wrong, deleted or
+// expired", which is CLI-side login UX this plugin never renders (its login
+// flow is its own device-code flow). Static artifact comparison against 1.88.4
+// finds no protocol change: 26 endpoint paths, 13 custom headers, the ZDR
+// exception set (19), `buildModelGroups` / `getPlanInfo`, the `/alpha/generate`
+// call site and the `promptCache` / `reasoning_effort` / `max_tokens` /
+// `cache_control` counts all match; the subscription map and ZDR diff are empty.
+// The only new literal is `DEEPSEEK_V4_1_FLASH_ULTRAFAST`, bound to the model
+// the server catalog added first: `catalogVersion` moves `b21583db…` ->
+// `d4517aa3…`, the default view 95 -> 96 and `?view=client` 109 -> 110 with
+// `deepseek/deepseek-v4.1-flash-ultrafast` (1M context, text + image, efforts
+// `off/low/high/max`, `individual-goat`, `zdr:true`, $2.40/$9.60/$0.048). That
+// row is a capabilities-snapshot sync, not a runtime change.
+export const COMMAND_CODE_CLI_VERSION = '1.88.5'
 export const DEFAULT_API_BASE = 'https://api.commandcode.ai'
 
 /**
@@ -2125,6 +2128,21 @@ function markLastUserCacheControl(messages: unknown[]): void {
   }
 }
 
+/**
+ * The `temperature` field for one chat body — or nothing when the model pins
+ * the value itself.
+ *
+ * Both chat transports spread the result, so the rule lives in one place:
+ * {@link pinsTemperature} names the models whose upstream accepts only 1 (see
+ * `PINNED_TEMPERATURE_MODELS` in `./capabilities.ts` for the measured refusal),
+ * and for those the field is omitted rather than rewritten, matching the
+ * Messages transport's handling of the same constraint.
+ */
+function temperatureField(options: GenerateOptions): Record<string, number> {
+  if (pinsTemperature(options.model)) return {}
+  return { temperature: options.temperature ?? 0.3 }
+}
+
 /** Build the legacy CLI (`/alpha/generate`) request body for one call. */
 async function buildCliBody(
   options: GenerateOptions,
@@ -2170,7 +2188,7 @@ async function buildCliBody(
       // field leaves the per-turn output size to the platform, which is the
       // only way to stop the passive ceiling from cutting an answer short.
       ...(facts.omitMaxTokens ? {} : { max_tokens: facts.maxTokens }),
-      temperature: options.temperature ?? 0.3,
+      ...temperatureField(options),
       stream: true,
       ...(facts.reasoningEffort ? { reasoning_effort: facts.reasoningEffort } : {}),
     },
@@ -2200,7 +2218,7 @@ async function buildOpenAIBody(
     messages: openAiMessages,
     ...(openAiTools.length > 0 ? { tools: openAiTools } : {}),
     ...(facts.omitMaxTokens ? {} : { max_tokens: facts.maxTokens }),
-    temperature: options.temperature ?? 0.3,
+    ...temperatureField(options),
     stream: true,
     ...(facts.reasoningEffort ? { reasoning_effort: facts.reasoningEffort } : {}),
   }
@@ -2565,7 +2583,13 @@ export class CommandCodeAdapter<C extends CommandCodeConnectionOptions = Command
 
   constructor(private readonly deps: CommandCodeAdapterDeps<C>) {
     super()
-    this.fetchImpl = deps.fetchImpl ?? fetch
+    // Late-bind the default instead of capturing the constructor-time function:
+    // a host plugin may patch `globalThis.fetch` AFTER this adapter is built
+    // (billion-context installs its prompt-compression interceptor during DSH
+    // startup), and a captured reference silently bypassed it — long sessions
+    // then overflowed the model window on the uncompressed history (issue #119).
+    // Explicit injection is unchanged; it remains the test/custom seam.
+    this.fetchImpl = deps.fetchImpl ?? ((input, init) => globalThis.fetch(input, init))
     this.resolveAttachments = deps.resolveAttachments
     this.surfaceOffload = deps.imageOffload ?? ENGINE_IMAGE_POLICY
   }
