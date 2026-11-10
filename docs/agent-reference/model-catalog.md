@@ -6,7 +6,7 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   `dsh-commandcode-upstream` skill for the exact extraction procedures; `src/adapter.ts` imports them and
   keeps only stable wire/runtime logic):
 
-  **Latest sync (2026-10-21, CLI 1.84.0 → 1.86.1):** the default catalog view went 94 → 96 ids and
+  **Sync (2026-10-21, CLI 1.84.0 → 1.86.1):** the default catalog view went 94 → 96 ids and
   `?view=client` 102 → 104. Added Ornith 1.5 122B (`ornith/ornith-1.5-122b` + `:free`): 262,144 context,
   text + image, automatic reasoning (no effort levels), Go tier, ZDR covered, paid `$0.16/$0.64/$0.02`,
   free twin 100% off until `2026-10-22T06:00Z`. The MiniMax M3.1 Flash free deal was extended one day
@@ -254,6 +254,51 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   three maps above. Verification: `typecheck` 0, `npm test` 1206/1206; no authenticated,
   paid-generation or browser-render check.
 
+  **Follow-up check (2026-11-10, CLI stays 1.88.5):** npm `latest` is still `1.88.5`
+  (11-06T21:18:22Z) and the official changelog's newest CLI entry is 11-07 `v1.88.5`, so all of
+  this round's drift is server-side. DSH has no new release either (`latest` / `next` stay
+  `0.2.2-rc.1`, `alpha` `0.2.2-alpha.3`). The live catalog's `catalogVersion` moves `d4517aa3…`
+  → `c6350c34…`: the default view 96 → 97 ids and `?view=client` 110 → 112 (fifteen `hidden`
+  rows). Two new ids, both catalog-first — the 1.88.5 artifact names neither, which is the whole
+  of the audit's two errors: `claude-fable-5-2` ("Claude Fable 5.2", premium, 1M context, text +
+  image, efforts `low`/`medium`/`high`/`xhigh`/`max`, `minimumPlan: individual-provider` — go,
+  go-v1, goat, pro and pro-v1 false, max / ultra / provider / teams-pro true —
+  `$8/$40/$0.2/$10` with `cacheWrite1hCost: 16`, `zdr:false`, `maxOutputTokens: null`, order 72)
+  and `meta/muse-ember` ("Muse Ember", opensource, Go tier with every availability flag true,
+  1,048,576 context, text + image + `file`, the same five-level set, `$0.1/$0.5/$0.004`,
+  `zdr:true`, `maxOutputTokens: null`, order 108). Both are on the models docs page and the
+  pricing page; Muse Ember also appears on the go / goat / pro / max plan pages, while Fable 5.2
+  appears on max only. Retirement: `reflection/beam:free` ("Beam 1.0 (Free)") now serves
+  `hidden: true`, has left the default view, and was dropped by the pricing page (its deal list
+  included), the models docs page and all four plan pages — the mirror image of the
+  catalog-first arrival it made at 1.84.0, since the 1.88.5 registry still names it. It is
+  treated as a retirement (decision record chapter 7 item 16) rather than a removal on missing
+  evidence: the row itself is no longer served anywhere a user can reach it.
+  Snapshot sync (user decision: full sync): `KNOWN_PLANS` 96 → 97 (rebuild — +2 new, −Beam),
+  `KNOWN_EFFORTS` 70 → 71, `KNOWN_IMAGE_MODELS` 75 → 77, `KNOWN_NON_ZDR_MODELS` 19 → 20
+  (`claude-fable-5-2` enters on the catalog `zdr:false` verdict because the union rule admits a
+  catalog-only exclusion; Beam stays, since both sources still serve its `zdr:false` and
+  retirement alone is not coverage evidence) and `KNOWN_DEALS` 4 → 3 (the Beam FREE entry is
+  deleted). Thinking 15, peak rows 5 and subscriptions 9 are unchanged. Vendored price rows
+  95 → 97 — Fable 5.2 `[8, 40, 0.2, 10]` with allowance go 6 / GOAT 20 / Pro 20, Muse Ember
+  `[0.1, 0.5, 0.004]` with go 6 / GOAT 20 / Pro 30 — and the whole-page re-fetch confirms no
+  other rate or allowance moved. The generated output-limit table stays at 82 rows but changes
+  composition: `claude-fable-5-2` gains 128,000 (the Anthropic models.dev row), `meta/muse-ember`
+  is left to runtime learning because its models.dev rows disagree (943,718 / 1,048,576 /
+  270,000), and `stealth/crouton-alpha`'s 943,718 row is dropped — models.dev renamed its
+  entries to `crouton-alpha-free` and files 270,000, so neither the vendor row nor unanimity
+  resolves (rule 4) and the new number is not written as a guess (the same decision as the free
+  Laguna row: keep the snapshot honest, let the runtime learn the real ceiling). Audit: 14
+  sources HTTP 200, and the only errors are the two catalog-first ids; before the sync
+  `candidateDiffs` named exactly the maps above. Re-running it on the synced tree leaves those
+  two ids as local-only entries in the `KNOWN_EFFORTS` and `KNOWN_NON_ZDR_MODELS` candidates,
+  because those candidate maps are built from the 1.88.5 registry, which does not name them —
+  the catalog (`?view=client`) has been the effort authority since 1.82.4 and the ZDR set is the
+  catalog/artifact union, so this is the expected shape rather than a disagreement.
+  `status=review-required`, `readyToApply=false`, protocol `not-verified`. Verification:
+  `typecheck` 0, `npm test` 1220/1220, `build` twice; no authenticated, paid-generation or
+  browser-render check.
+
   - `KNOWN_EFFORTS` — model → selectable reasoning-effort levels. Authoritative source is the live
     `?view=client` catalog's `reasoningEfforts` (since command-code@1.82.4 the CLI no longer keeps this map
     bundled — `getSupportedEfforts()` resolves it through the catalog, whose embedded bootstrap snapshot
@@ -442,7 +487,9 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   - The picker `description` is composed by `capabilityDescription()`: plan tier · active deal ·
     peak/off-peak state (`Peak`/`Half`, hourly-priced models only) · `Image` (Vision only) · context
     (`formatContext()`: `1M`/`256K`/`262K`). Text-only models show no capability marker. Do not reintroduce
-    "Text only" or "Supports image input".
+    "Text only" or "Supports image input". The display name above the description can itself be overridden
+    per catalog id via `Config.modelNames` (issue #121) — a label-only change that never touches the
+    description, the model id, the request body, pricing or peak/off-peak membership.
   - **自定义上下文长度（issue #86）**：`resolveModel()` 与 `listModels()` 宣告的窗口是
     `effectiveContextWindow(catalog, model, connection)`——`contextWindowOverrides`（按模型）→
     `contextWindow`（全局）→ 目录 `context_length`——选择器标注与宿主的 `context.contextWindow`
@@ -456,8 +503,10 @@ Task-specific reference moved from the former root `AGENTS.md`. All source and t
   - The picker list is **sorted free models first, then by plan tier, then name** (`compareByPlan()` in
     `src/capabilities.ts`; free = `KNOWN_DEALS` `free: true` via `isFreeModel()`, tier weights in
     `PLAN_ORDER`): FREE → Go → GOAT → Pro → Provider → Max, alphabetical within each group, unknown plans
-    last. Keep this order when changing `listModels()`. `formatContext()` renders sub-1K windows raw (never
-    `"0K"`).
+    last. Keep this order when changing `listModels()`. A `Config.modelNames` override (issue #121) applies
+    only to `LlmModelInfo.name` AFTER this sort, so the order still follows the catalog original name; it never
+    touches the model id, request body, pricing or peak/off-peak membership. `formatContext()` renders
+    sub-1K windows raw (never `"0K"`).
   - The picker also **hides models above the account's subscription tier** (`modelVisibleInPlan()`, on by
     default via `filterModelsByPlan`): the billing facts mirror the CLI's `createBilling` flow — whoami →
     orgId, then `/alpha/billing/subscriptions` (planId, honored only for `active`/`trialing`/`past_due`

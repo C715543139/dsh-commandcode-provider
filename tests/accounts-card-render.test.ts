@@ -74,6 +74,7 @@ function makeState(overrides: Partial<SettingsPageState> = {}): SettingsPageStat
     contextWindow: stagedField(),
     maxOutputTokens: stagedField(),
     contextWindowOverrides: [],
+    modelNames: [],
     catalogModels: [],
     catalogFailed: false,
     dirty: false,
