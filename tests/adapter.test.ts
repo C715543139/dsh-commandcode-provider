@@ -539,6 +539,67 @@ test('OpenAI 独立尾部用量包在结束原因之后仍被读取', async () =
   assert.equal(chunks.at(-1)?.type, 'finish')
 })
 
+test('OpenAI 占位 choice 尾部用量在成功结束前交付（问题 #124）', async () => {
+  const sse = (data: unknown) => `data: ${JSON.stringify(data)}\n\n`
+  const adapter = makeAdapter({
+    options: () => ({ apiBase: DEFAULT_API_BASE, workingDir: '/tmp', protocol: 'openai', modelsCachePath: '', requestTimeoutMs: 1000, streamIdleTimeoutMs: 1000 }),
+    fetchImpl: (async () => packetResponse([
+      sse({ choices: [{ delta: { content: 'hi' } }] }),
+      sse({ choices: [{ delta: {}, finish_reason: 'stop' }] }),
+      sse({ choices: [{ finish_reason: null, index: 0, delta: {} }], usage: {
+        completion_tokens: 37, prompt_tokens: 32, total_tokens: 69,
+        completion_tokens_details: { reasoning_tokens: 25, text_tokens: 12 },
+        prompt_tokens_details: { cached_tokens: 0 },
+      } }),
+      'data: [DONE]\n\n',
+    ])) as typeof fetch,
+  })
+  const chunks = await collect(adapter.stream({ provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash', messages: [userMessage('say hi')] }))
+  assert.deepEqual(chunks.filter(chunk => chunk.type === 'usage' || chunk.type === 'finish'), [
+    { type: 'usage', usage: { inputTokens: 32, outputTokens: 37, cacheReadTokens: 0, reasoningTokens: 25, totalTokens: 69 } },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+})
+
+test('OpenAI 省略结束原因的尾部用量保留缓存读数，后续 null 不覆盖（问题 #124）', async () => {
+  const sse = (data: unknown) => `data: ${JSON.stringify(data)}\n\n`
+  const adapter = makeAdapter({
+    options: () => ({ apiBase: DEFAULT_API_BASE, workingDir: '/tmp', protocol: 'openai', modelsCachePath: '', requestTimeoutMs: 1000, streamIdleTimeoutMs: 1000 }),
+    fetchImpl: (async () => packetResponse([
+      sse({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+      sse({ choices: [{ index: 0, delta: {} }], usage: {
+        prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 90 },
+      } }),
+      sse({ choices: [{ delta: {}, finish_reason: null }], usage: null }),
+    ])) as typeof fetch,
+  })
+  const chunks = await collect(adapter.stream({ provider: 'commandcode', model: 'review/model', messages: [userMessage('hi')] }))
+  assert.deepEqual(chunks.filter(chunk => chunk.type === 'usage' || chunk.type === 'finish'), [
+    { type: 'usage', usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 90 } },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+})
+
+test('OpenAI 多帧累计用量只交付最后一份，且不丢正文（问题 #124）', async () => {
+  const sse = (data: unknown) => `data: ${JSON.stringify(data)}\n\n`
+  const adapter = makeAdapter({
+    options: () => ({ apiBase: DEFAULT_API_BASE, workingDir: '/tmp', protocol: 'openai', modelsCachePath: '', requestTimeoutMs: 1000, streamIdleTimeoutMs: 1000 }),
+    fetchImpl: (async () => packetResponse([
+      sse({ choices: [{ delta: { content: 'o' }, finish_reason: null }], usage: { prompt_tokens: 100, completion_tokens: 1 } }),
+      sse({ choices: [{ delta: { content: 'k' } }], usage: { prompt_tokens: 100, completion_tokens: 2 } }),
+      sse({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 3 } }),
+      sse({ choices: [{ delta: {}, finish_reason: null }], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105, prompt_tokens_details: { cached_tokens: 90 } } }),
+      'data: [DONE]\n\n',
+    ])) as typeof fetch,
+  })
+  const chunks = await collect(adapter.stream({ provider: 'commandcode', model: 'review/model', messages: [userMessage('hi')] }))
+  assert.equal(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.text).join(''), 'ok')
+  assert.deepEqual(chunks.filter(chunk => chunk.type === 'usage' || chunk.type === 'finish'), [
+    { type: 'usage', usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 90, totalTokens: 105 } },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+})
+
 test('冷生成从同网关磁盘目录计算预算，切换网关不沿用旧目录且不额外联网', async () => {
   const { mkdtempSync, writeFileSync } = await import('node:fs')
   const directory = mkdtempSync(join(tmpdir(), 'commandcode-cold-budget-'))
@@ -3642,6 +3703,164 @@ test('openai protocol sends flat body and replays reasoning_content in history',
   assert.equal(tool.content, 'sunny')
 })
 
+// ---------------------------------------------------------------------------
+// Issue #122: a reasoning-only assistant turn must not reach the wire as
+// `content: null` with no tool calls.
+//
+// Measured 2026-11-11 against `/provider/v1/chat/completions` with
+// `deepseek/deepseek-v4.1-flash`, one request per shape: `content: null` plus a
+// `reasoning_content` is refused with HTTP 400 `Invalid assistant message:
+// content or tool_calls must be set`; `content: ''` with the same reasoning
+// answers 200; an absent `content` key also answers 400. A turn that produced
+// only reasoning (a thinking-only stop, or an empty answer) is therefore the
+// shape that broke every later turn of a GOAT session — the request, not the
+// turn, is rejected, so the conversation died permanently once such a turn was
+// in its history. `/alpha/generate` carries reasoning as a content PART with no
+// null/empty distinction (also measured 200), which is why the same session
+// worked on the CLI path and on other providers.
+// ---------------------------------------------------------------------------
+
+/** Capture the OpenAI-protocol request body one `stream()` call puts on the wire. */
+async function captureOpenAiBody(messages: Message[], model: string): Promise<Record<string, unknown>> {
+  let capturedBody: Record<string, unknown> | undefined
+  const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    capturedBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return new Response('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })
+  }) as unknown as typeof fetch
+  const adapter = makeAdapter({
+    options: () => ({
+      apiBase: 'https://api.commandcode.ai',
+      workingDir: '/tmp/project',
+      modelsCachePath: '/tmp/cc-models-cache.json',
+      requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
+      streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+      protocol: 'openai' as const,
+    }),
+    fetchImpl,
+  })
+  await collect(adapter.stream({ provider: 'commandcode', model, messages }))
+  assert.ok(capturedBody, 'the request body must have been captured')
+  return capturedBody
+}
+
+test('#122: a reasoning-only assistant turn replays as content "" — never null', async () => {
+  const body = await captureOpenAiBody([
+    userMessage('hi'),
+    {
+      id: messageId(),
+      role: 'assistant',
+      content: [{ type: 'reasoning', text: 'just thinking, no answer text' }],
+      source: { kind: 'model', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' },
+    },
+    userMessage('and again'),
+  ], 'deepseek/deepseek-v4.1-flash')
+
+  const wireMessages = body.messages as Record<string, unknown>[]
+  const assistant = wireMessages.find((m) => m.role === 'assistant')!
+  // The reasoning is still replayed on its own field...
+  assert.equal(assistant.reasoning_content, 'just thinking, no answer text')
+  // ...and the content is the empty STRING the endpoint accepts, not null.
+  assert.equal(assistant.content, '')
+  assert.notEqual(assistant.content, null)
+  assert.equal(assistant.tool_calls, undefined)
+})
+
+test('#122: a tool-call assistant turn keeps content null (that shape is accepted)', async () => {
+  const callId = ToolCallId('call-null')
+  const body = await captureOpenAiBody([
+    userMessage('weather?'),
+    {
+      id: messageId(),
+      role: 'assistant',
+      content: [{ type: 'reasoning', text: 'call the tool' }, { type: 'tool-call', id: callId, name: 'get_weather', arguments: '{}' }],
+      source: { kind: 'model', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' },
+    },
+    toolMessage(callId, [{ type: 'text', text: 'sunny' }]),
+  ], 'deepseek/deepseek-v4.1-flash')
+
+  const assistant = (body.messages as Record<string, unknown>[]).find((m) => m.role === 'assistant')!
+  // `content: null` beside `tool_calls` is the documented OpenAI shape and was
+  // measured 200 — it must NOT be rewritten to ''.
+  assert.equal(assistant.content, null)
+  assert.ok(Array.isArray(assistant.tool_calls) && (assistant.tool_calls as unknown[]).length === 1)
+})
+
+test('#122: every textless, tool-less assistant turn on the wire carries "" (no stragglers)', async () => {
+  // A session with several reasoning-only turns interleaved with normal ones —
+  // the shape a real long tool loop produces. No assistant message may leave the
+  // adapter with `content: null` unless it also carries tool_calls.
+  const callId = ToolCallId('call-x')
+  const body = await captureOpenAiBody([
+    userMessage('start'),
+    { id: messageId(), role: 'assistant', content: [{ type: 'reasoning', text: 'r1' }],
+      source: { kind: 'model', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' } },
+    userMessage('go'),
+    { id: messageId(), role: 'assistant', content: [{ type: 'text', text: 'here' }, { type: 'reasoning', text: 'r2' }],
+      source: { kind: 'model', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' } },
+    userMessage('tool time'),
+    { id: messageId(), role: 'assistant', content: [{ type: 'reasoning', text: 'r3' }, { type: 'tool-call', id: callId, name: 'get_weather', arguments: '{}' }],
+      source: { kind: 'model', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' } },
+    toolMessage(callId, [{ type: 'text', text: 'sunny' }]),
+    userMessage('done?'),
+    { id: messageId(), role: 'assistant', content: [{ type: 'reasoning', text: 'r4' }],
+      source: { kind: 'model', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' } },
+    userMessage('yes'),
+  ], 'deepseek/deepseek-v4.1-flash')
+
+  const assistants = (body.messages as Record<string, unknown>[]).filter((m) => m.role === 'assistant')
+  assert.equal(assistants.length, 4)
+  for (const message of assistants) {
+    const hasCalls = Array.isArray(message.tool_calls) && (message.tool_calls as unknown[]).length > 0
+    // The invariant: `content: null` is legal ONLY beside tool_calls. Everything
+    // else must carry a string ('' for a reasoning-only turn, the text otherwise).
+    if (hasCalls) continue
+    assert.notEqual(message.content, null, 'a tool-less assistant turn must never carry content:null')
+    assert.equal(typeof message.content, 'string')
+  }
+  // The text-bearing turn keeps its text; the reasoning-only ones carry ''.
+  const contents = assistants.map((m) => m.content)
+  assert.deepEqual(contents, ['', 'here', null, ''])
+})
+
+test('#122: an ORPHANED tool call must not degrade into content:null', async () => {
+  // The production path that actually produced the 400. `pairedToolCalls()`
+  // drops a tool call with no answering tool result — what compaction, tool
+  // result pruning, an interrupted turn or a cross-provider switch leaves
+  // behind. The turn then has no tool_calls on the wire, so a reasoning-only
+  // body collapsed to `content: null` and the endpoint refused EVERY later turn
+  // of that session with `content or tool_calls must be set`.
+  //
+  // Measured 2026-11-11 against the live endpoint through this very adapter:
+  // before the fix the request answered HTTP 400 with that upstream sentence;
+  // after it, `content: ''` and the same history streams normally. This case
+  // pins the degradation path rather than only the hand-built shape.
+  const orphanId = ToolCallId('call-orphan')
+  const body = await captureOpenAiBody([
+    userMessage('read the file'),
+    {
+      id: messageId(),
+      role: 'assistant',
+      content: [
+        { type: 'reasoning', text: 'I should read that file.' },
+        { type: 'tool-call', id: orphanId, name: 'read_file', arguments: '{"path":"/tmp/x"}' },
+      ],
+      source: { kind: 'model', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' },
+    },
+    // Deliberately NO tool message answering orphanId.
+    userMessage('are you there?'),
+  ], 'deepseek/deepseek-v4.1-flash')
+
+  const assistant = (body.messages as Record<string, unknown>[]).find((m) => m.role === 'assistant')!
+  // The unpaired call is dropped (existing policy)...
+  assert.equal(assistant.tool_calls, undefined)
+  // ...so the turn stands alone, and must carry the empty STRING, not null.
+  assert.equal(assistant.content, '')
+  assert.equal(assistant.reasoning_content, 'I should read that file.')
+})
+
 test('openai protocol remaps overlong cross-provider tool-call ids', async () => {
   let capturedBody: Record<string, unknown> | undefined
   const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -4499,7 +4718,7 @@ for (const protocol of ['cli', 'openai'] as const) {
             return new Response(`data: ${JSON.stringify(event)}\n\ndata: ${JSON.stringify(finish)}\n\n`)
           }) as typeof fetch,
         })
-        const options: GenerateOptions = Object.freeze({
+        const options: Parameters<CommandCodeAdapter['stream']>[0] = Object.freeze({
           provider: 'commandcode', model, purpose: 'session-title', maxTokens: 64,
           ...(reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(reasoningEffort) }),
           messages: [userMessage('生成会话标题')],
@@ -4858,6 +5077,38 @@ test('a JSON node-count refusal names the gateway structure cap, not a context o
     },
   )
   // Permanent and request-scoped: no ceiling to learn, nothing to resend.
+  assert.equal(attempts(), 1)
+})
+
+test('a malformed-assistant rejection names the history shape, not model/plan/settings (issue #122)', async () => {
+  // The upstream body measured 2026-11-11 for a replayed assistant turn whose
+  // content was null with no tool_calls. The gateway double-encodes it, so the
+  // sentence lives only in `rawMessage` — the same path the #96 branch reads.
+  // Before this branch it fell through to the generic refusal, whose advice
+  // ("check the model, plan and request settings") is wrong three ways at once.
+  const { adapter, model, attempts } = ceilingProbeAdapter('deepseek-malformed-turn', () =>
+    nestedGatewayRejection(400, {
+      message: 'Invalid assistant message: content or tool_calls must be set',
+      type: 'invalid_request_error',
+      code: 'bad_request',
+    }))
+  await assert.rejects(
+    collect(adapter.stream({ provider: 'commandcode', model, messages: [userMessage('hi')] })),
+    (error: unknown) => {
+      const message = (error as Error).message
+      assert.equal((error as { code?: string }).code, 'PROVIDER_HTTP_ERROR')
+      // Says what is actually wrong, in both languages.
+      assert.match(message, /malformed|结构不合法/u)
+      assert.match(message, /回放的 assistant 消息结构不合法/u)
+      // The actionable levers: upgrade the plugin, or start a new session.
+      assert.match(message, /new session|新建会话/u)
+      // And NOT the misleading generic advice this used to show.
+      assert.doesNotMatch(message, /请检查模型、套餐和请求设置/u)
+      assert.doesNotMatch(message, /check the model, plan/u)
+      return true
+    },
+  )
+  // Structurally invalid → resending the identical body cannot succeed.
   assert.equal(attempts(), 1)
 })
 
@@ -7425,6 +7676,28 @@ for (const protocol of ['cli', 'openai', 'messages'] as const) {
   })
 }
 
+for (const protocol of ['cli', 'openai', 'messages'] as const) {
+  test(`${protocol}：自定义限流错误保留原型、重试等待与响应请求号`, async () => {
+    const adapter = makeAdapter({
+      options: () => ({ ...OPENAI_OPTIONS(), protocol: protocol === 'messages' ? 'auto' : protocol, modelsCachePath: '' }),
+      fetchImpl: (async () => new Response('rate limited', {
+        status: 429,
+        headers: { 'retry-after': '7', 'x-request-id': 'synthetic-throttle-request' },
+      })) as typeof fetch,
+    })
+    await assert.rejects(collect(adapter.stream({ provider: 'commandcode', model: protocol === 'messages' ? 'claude-haiku-5-5' : 'm', messages: [userMessage('hi')] })), (error: unknown) => {
+      assert.ok(error instanceof LlmError)
+      assert.equal(error.code, 'THROTTLED')
+      assert.deepEqual(error.failure, {
+        message: error.message, code: 'THROTTLED', status: 429,
+        providerRetryAfterMs: 7000, requestId: 'synthetic-throttle-request',
+      })
+      assert.ok(Object.isFrozen(error.failure))
+      return true
+    })
+  })
+}
+
 test('Messages 的权限拒绝回退 CLI 直连，CLI 成功后正常收流', async () => {
   const paths: string[] = []
   const adapter = makeAdapter({
@@ -8437,17 +8710,62 @@ for (const protocol of ['cli', 'openai'] as const) {
   })
 }
 
-test('a token-limited empty response does not invent reasoning usage', async () => {
-  const adapter = makeAdapter({ options: OPENAI_OPTIONS, fetchImpl: fetchReturning(200,
-    'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n') })
-  await assert.rejects(collect(adapter.stream({ provider: 'commandcode', model: 'm', messages: [userMessage('hi')] })), (error: unknown) => {
-    const e = error as { code: string; message: string }
-    assert.equal(e.code, 'OUTPUT_TOKEN_LIMIT')
-    assert.match(e.message, /reasoningTokens=unknown/)
-    assert.doesNotMatch(e.message, /全部|\ball\b.*reasoning/)
-    return true
+for (const protocol of ['cli', 'openai', 'messages'] as const) {
+  test(`${protocol}: a token-limit signal without usage does not claim measured budget exhaustion`, async () => {
+    const events = protocol === 'cli'
+      ? [{ type: 'finish', finishReason: 'length' }]
+      : protocol === 'messages'
+        ? [{ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }, { type: 'message_stop' }]
+        : [{ choices: [{ delta: {}, finish_reason: 'length' }], usage: null }]
+    const adapter = makeAdapter({
+      options: () => ({ ...OPENAI_OPTIONS(), protocol: protocol === 'cli' ? 'cli' : 'openai' }),
+      fetchImpl: fetchReturning(200, events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('')),
+    })
+    const seen: StreamChunk[] = []
+    await assert.rejects(async () => {
+      for await (const chunk of adapter.stream({ provider: 'commandcode', model: protocol === 'messages' ? 'claude-settlement' : 'm', messages: [userMessage('hi')] })) seen.push(chunk)
+    }, (error: unknown) => {
+      const e = error as { code: string; message: string }
+      assert.equal(e.code, 'OUTPUT_TOKEN_LIMIT')
+      assert.match(e.message, /outputTokens=unknown, reasoningTokens=unknown/)
+      assert.match(e.message, /max_tokens 表示输出预算，并非已消耗 token 数/)
+      assert.match(e.message, /上游未返回用量，无法确认实际消耗/)
+      assert.match(e.message, /DSH_COMMANDCODE_TRACE/)
+      assert.doesNotMatch(e.message, /reached the output token limit|已达到输出 token 上限|全部|\ball\b.*reasoning/)
+      return true
+    })
+    assert.equal(seen.some(chunk => chunk.type === 'usage' || chunk.type === 'finish'), false)
+    const policy = adapter.providerRetryPolicy('commandcode')
+    assert.equal(policy.mode, 'normal')
+    assert.equal(policy.retryableCodes.includes('OUTPUT_TOKEN_LIMIT'), false)
   })
-})
+}
+
+for (const standalone of [false, true]) {
+  test(`OpenAI: null usage does not overwrite received usage (${standalone ? 'standalone' : 'finish'} chunk)`, async () => {
+    const events = [
+      { choices: [], usage: { prompt_tokens: 10, completion_tokens: 32, completion_tokens_details: { reasoning_tokens: 31 } } },
+      { choices: [{ delta: {}, finish_reason: 'length' }], ...(standalone ? {} : { usage: null }) },
+      ...(standalone ? [{ choices: [], usage: null }] : []),
+    ]
+    const adapter = makeAdapter({ options: OPENAI_OPTIONS, fetchImpl: fetchReturning(200,
+      events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n') })
+    const seen: StreamChunk[] = []
+    await assert.rejects(async () => {
+      for await (const chunk of adapter.stream({ provider: 'commandcode', model: 'm', maxTokens: 32, messages: [userMessage('hi')] })) seen.push(chunk)
+    }, (error: unknown) => {
+      const e = error as { code: string; message: string }
+      assert.equal(e.code, 'OUTPUT_TOKEN_LIMIT')
+      assert.match(e.message, /outputTokens=32, reasoningTokens=31/)
+      assert.doesNotMatch(e.message, /上游未返回用量/)
+      return true
+    })
+    assert.deepEqual(seen.filter(chunk => chunk.type === 'usage').map(chunk => chunk.usage), [
+      { inputTokens: 10, outputTokens: 32, cacheReadTokens: 0, reasoningTokens: 31 },
+    ])
+    assert.equal(seen.some(chunk => chunk.type === 'finish'), false)
+  })
+}
 
 test('an explicit content filter is not retried as an empty response', async () => {
   const adapter = makeAdapter({ options: OPENAI_OPTIONS, fetchImpl: fetchReturning(200,

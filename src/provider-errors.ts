@@ -1,12 +1,13 @@
 /** 连接拒绝与流内错误共享同一分类，避免错误恢复因响应载体不同而漂移。 */
-import { CONTEXT_WINDOW_EXCEEDED_CODE, isContextWindowExceededError, LlmError, type LlmErrorOptions } from '@deepseek-ai/dsh-llm'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, isContextWindowExceededError, type LlmError, type LlmErrorOptions } from '@deepseek-ai/dsh-llm'
+import { providerError } from './llm-error.ts'
 import { RETRY_MAX_DELAY_MS } from './accounts.ts'
 import { THROTTLED_CODE } from './transient-retry.ts'
 import { booleanValue, isRecord, numberValue, stringValue } from './wire-guards.ts'
 
 /** Keep the two user-facing languages and error metadata together. */
 export function bilingual(code: string, en: string, zh: string, options?: LlmErrorOptions): LlmError {
-  return new LlmError(`${en}；${zh}`, code, options)
+  return providerError(`${en}；${zh}`, code, options)
 }
 
 /**
@@ -90,6 +91,24 @@ export function parseOutputCeiling(detail: string): number | undefined {
  * number and it can move.
  */
 const JSON_NODE_LIMIT_REJECTION = /JSON node count cannot exceed\s+(\d+)/i
+
+/**
+ * Whether one rejection says an assistant history turn is structurally invalid:
+ * `Invalid assistant message: content or tool_calls must be set`.
+ *
+ * This is the upstream wording for a replayed assistant message whose `content`
+ * is null while it carries no `tool_calls` (issue #122). The adapter no longer
+ * emits that shape — a reasoning-only turn goes out with `content: ''` — but the
+ * diagnosis is kept so a session recorded by an OLDER build, or a transcribed
+ * body from another client, still names the real cause. Without it the refusal
+ * carries no field the mapping recognises and lands in the generic "服务端拒绝了
+ * 本次请求，请检查模型、套餐和请求设置" branch, steering the user at three things
+ * that are all fine.
+ *
+ * Matched on the provider detail rather than a status, because the gateway
+ * folds it into an ordinary 400.
+ */
+const ASSISTANT_MESSAGE_SHAPE_REJECTION = /content or tool_calls must be set/i
 
 /**
  * Whether one rejection says "ZDR requested, no ZDR-capable upstream": the
@@ -187,7 +206,7 @@ export function streamErrorToLlmError(value: unknown, fallbackMessage?: string):
       ? false
       : (statusCode !== undefined ? retryableStatus : true))
   if (!retryable) {
-    return new LlmError(
+    return providerError(
       `Command Code stream error: ${message}`,
       'PROVIDER_STREAM_ERROR',
       statusOption,
@@ -203,7 +222,7 @@ export function streamErrorToLlmError(value: unknown, fallbackMessage?: string):
       { ...statusOption, ...(wait > 0 ? { providerRetryAfterMs: wait } : {}) },
     )
   }
-  return new LlmError(
+  return providerError(
     `Command Code stream error: ${message}`,
     'SERVER',
     statusOption,
@@ -404,6 +423,25 @@ export function generateHttpError(
       { status },
     )
   }
+  if (status < 500 && ASSISTANT_MESSAGE_SHAPE_REJECTION.test(overflowDetail)) {
+    // A structurally invalid replayed turn, not a model/plan/settings problem
+    // (issue #122). No retry and no compaction can fix a malformed message, so
+    // the advice names the one real recovery: the history has to stop sending
+    // that shape, which a rebuilt (new) session does and a resumed one may not.
+    return bilingual(
+      'PROVIDER_HTTP_ERROR',
+      `Command Code API error ${status}: a replayed assistant turn is malformed`
+      + ' — the provider refuses a message whose content is empty while it carries no tool call'
+      + ' (upstream: "content or tool_calls must be set"). This is not a model, plan or'
+      + ' settings problem: the session history contains a turn this endpoint cannot accept.'
+      + ' Update the plugin, then retry; if it persists, start a new session',
+      `Command Code API 返回 ${status}：回放的 assistant 消息结构不合法`
+      + '——上游拒绝了「正文为空且没有工具调用」的 assistant 消息（原文：content or tool_calls must be set）。'
+      + '这不是模型、套餐或请求设置的问题，而是会话历史里存在该端点无法接受的一轮。'
+      + '请升级插件后重试；若仍失败，请新建会话',
+      { status },
+    )
+  }
   if (status === 422 && isZdrNoProviders(providerCode, providerDetail, errText)) {
     // Zero data retention refused (the `zdr` connection option is on): either
     // this model has no ZDR-capable upstream, or none had capacity at that
@@ -489,7 +527,7 @@ export function generateHttpError(
   const priorNote = priorIdentifier === undefined
     ? ''
     : `此前 Messages 接口以 ${priorIdentifier} 拒绝，已回退 CLI 直连，仍未成功。`
-  return new LlmError(
+  return providerError(
     `Command Code 请求失败（HTTP ${status}）${diagnostic}：`
       + (status === 429 ? '请求受到用量或速率限制，请稍后重试并检查账户额度。'
         : status === 408 ? '服务端处理超时，请稍后重试。'

@@ -56,7 +56,7 @@ import {
   type LlmImageRequestPricing,
   type ResolvedRetryPolicy,
   type ContentBlock,
-  type GenerateOptions,
+  type GenerateOptions as HarnessGenerateOptions,
   type LlmModelInfo,
   type LlmProviderInfo,
   type LlmResolvedModelInfo,
@@ -87,6 +87,11 @@ import {
 
 import { GatewayFacts, catalogModelMaxTokens, modelOutputTokenLimit, learnedOutputLimit, outputCeilingRefusal, type CommandCodeModel } from './gateway-facts.ts'
 export { DEFAULT_MAX_OUTPUT_TOKENS, MODEL_CATALOG_TTL_MS } from './gateway-facts.ts'
+
+// Producers own the newer engine's purpose registry. A forwarding adapter must
+// also accept calls from producers whose type augmentation is not imported here.
+// Omit keeps this shape usable with older, non-generic GenerateOptions too.
+type GenerateOptions = Omit<HarnessGenerateOptions, 'purpose'> & { purpose?: string }
 
 // ---------------------------------------------------------------------------
 // Request / connection defaults (protocol constants). The model/plan/deal
@@ -1368,7 +1373,29 @@ const openAiMessageCodec: MessageCodec = {
         function: { name: block.name, arguments: block.arguments },
       }))
     if (text === '' && reasoning === '' && toolCalls.length === 0) return undefined
-    const assistant: Record<string, unknown> = { role: 'assistant', content: text === '' ? null : text }
+    // `content: null` is only legal BESIDE `tool_calls`. A turn that produced
+    // reasoning and nothing else — a thinking-only stop, or an empty answer —
+    // has no tool calls to justify the null, and the endpoint refuses the whole
+    // request with `Invalid assistant message: content or tool_calls must be
+    // set` (issue #122). The refusal arrives as a bare 400 with no field name,
+    // so it surfaced as the generic "服务端拒绝了本次请求" diagnostic even though
+    // the model, plan and settings were all fine.
+    //
+    // Measured 2026-11-11 on `/provider/v1/chat/completions` with
+    // `deepseek/deepseek-v4.1-flash`, one minimal request per shape:
+    // `content: null` + `reasoning_content` → 400; `content: ''` + the same
+    // `reasoning_content` → 200; the `content` key absent → 400. So the empty
+    // STRING is the accepted spelling and is what a textless, tool-less turn
+    // must send. `tool_calls` keeps the null (also measured 200), because that
+    // is the shape the OpenAI schema documents for a call turn.
+    //
+    // Only this transport is affected: `/alpha/generate` carries reasoning as a
+    // content PART with no null/empty distinction (measured 200 for the same
+    // history), which is why the same session works on the CLI path.
+    const assistant: Record<string, unknown> = {
+      role: 'assistant',
+      content: text !== '' ? text : (toolCalls.length > 0 ? null : ''),
+    }
     if (reasoning !== '') assistant.reasoning_content = reasoning
     if (toolCalls.length > 0) assistant.tool_calls = toolCalls
     return assistant
